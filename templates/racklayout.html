@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>상면도</h1>
+<hr width="100%" class="divider"/>
+<hr>
+<div>
+    <div class="text-right py-2">
+        <a href="{{ url_for('racklayout_edit') }}" class="btn btn-primary">편집</a>
+    </div>
+    <div class="rack">
+        {% for floor in floors %}
+            <h2>{{ floor }}</h2>
+            {% for column in floor_columns[floor] %}
+                <div class="column text-center">
+                    <div class="column-header">{{ column }}</div>
+                    {% for loc in range(1, 16) %}
+                        {% set loc_string = '{0:02d}'.format(loc) %}
+                        {% set last_char = column[-1] %}
+                        {% set new_column = column[:-1] %}
+                        {% set new_loc_string = last_char ~ loc_string %}
+                        {% set loc_key = "{}-{}-{}".format(floor, column, loc_string) %}
+                        {% if equipment_data[loc_key] %}
+                            {% set rack_info = rack_info_dict.get(loc_key, ('', 0)) %}
+                            {% set rackname = rack_info[0] %}
+                            {% set rackenable = rack_info[1] %}
+
+                            {% if rackenable == 1 %}
+                                <div class="slot" onclick="location.href='{{ url_for('rackview', floor=floor, column=new_column, location=new_loc_string) }}'">
+                                    {{ loc_string }}<br>{{ rackname }}
+                                </div>
+                            {% elif rackenable == 2 %}
+                                <div class="slot" style="background-color: #ffc107;" onclick="location.href='{{ url_for('rackview', floor=floor, column=new_column, location=new_loc_string) }}'">
+                                    {{ loc_string }}<br>{{ rackname }}
+                                </div>
+                            {% elif rackenable == 3 %}
+                                <div class="slot" style="background-color: #dc3545;" onclick="location.href='{{ url_for('rackview', floor=floor, column=new_column, location=new_loc_string) }}'">
+                                    {{ loc_string }}<br>{{ rackname }}
+                                </div>
+                            {% else %}
+                                <div class="slot" onclick="location.href='{{ url_for('rackview', floor=floor, column=new_column, location=new_loc_string) }}'">
+                                    {{ loc_string }}<br>{{ rackname }}
+                                </div>
+                            {% endif %}
+                        {% else %}
+                            <div class="slot disabled">{{ loc_string }}</div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            {% endfor %}
+        {% endfor %}
+    </div>
+</div>
+
+<style>
+    .rack {
+        display: flex;
+        flex-direction: column;
+        margin: 20px;
+    }
+    .column {
+        display: flex;
+        margin-bottom: 20px;
+    }
+    .column-header {
+        font-weight: bold;
+        margin-right: 10px;
+        align-self: center;
+    }
+    .slot {
+        width: 100px;
+        height: 100px;
+        border: 1px solid #000;
+        margin: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background-color 0.3s;
+    }
+    .slot:hover {
+        background-color: #e2e6ea;
+    }
+    .disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+    }
+</style>
+{% endblock %}

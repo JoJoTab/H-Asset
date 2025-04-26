@@ -1,0 +1,395 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>실장도</h1>
+<hr width="100%" class="divider"/>
+<hr>
+<div class="div_container">
+    <div class="select_container">
+        <div class="box">
+            <select id="floor-select">
+            <option value="">층 선택</option>
+                {% for floor in floors %}
+                <option value="{{ floor }}" {% if floor == selected_floor %}selected{% endif %}>{{ floor }}</option>
+                {% endfor %}
+            </select>
+            <select id="column-select">
+                <option value="">열 선택</option>
+                {% for column in columns %}
+                <option value="{{ column }}" {% if column == selected_column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+            <select id="location-select">
+                <option value="">위치 선택</option>
+                {% for location in locations %}
+                <option value="{{ location }}" {% if location == selected_location %}selected{% endif %}>{{ location }}</option>
+                {% endfor %}
+            </select>
+            <div class="py-2">
+                <button type="submit" id="fetch-data">검색</button>
+            </div>
+        </div>
+        <div class="box text-right py-2">
+            <button type="submit" id="export-rack">내보내기</button>
+        </div>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th width="10%">상단번호</th>
+                <th width="30%">모델명</th>
+                <th width="45%">서버명</th>
+                <th width="15%">담당자</th>
+            </tr>
+        </thead>
+        <tbody id="equipment-table-body">
+            {% for equipment in equipment_data %}
+            <tr>
+                <td>{{ equipment.id }}</td>
+                <td></td>
+                <td></td>
+                <td></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<script>
+    document.getElementById('floor-select').addEventListener('change', function() {
+        const floor = this.value;
+
+        if (floor) {
+            fetch(`/get_columns?floor=${floor}`)
+                .then(response => response.json())
+                .then(data => {
+                    const columnSelect = document.getElementById('column-select');
+                    columnSelect.innerHTML = '<option value="">열 선택</option>';  // 초기화
+
+                    data.forEach(column => {
+                        const option = document.createElement('option');
+                        option.value = column;
+                        option.textContent = column;
+                        columnSelect.appendChild(option);
+                    });
+
+                    // 열 선택 후 위치를 초기화
+                    document.getElementById('location-select').innerHTML = '<option value="">위치 선택</option>';
+                })
+                .catch(error => console.error('Error:', error));
+        } else {
+            // 선택된 층이 없을 경우 열과 위치 초기화
+            document.getElementById('column-select').innerHTML = '<option value="">열 선택</option>';
+            document.getElementById('location-select').innerHTML = '<option value="">위치 선택</option>';
+        }
+    });
+
+    document.getElementById('column-select').addEventListener('change', function() {
+        const floor = document.getElementById('floor-select').value;
+        const column = this.value;
+
+        if (floor && column) {
+            fetch(`/get_locations?floor=${floor}&column=${column}`)
+                .then(response => response.json())
+                .then(data => {
+                    const locationSelect = document.getElementById('location-select');
+                    locationSelect.innerHTML = '<option value="">위치 선택</option>';  // 초기화
+
+                    data.forEach(location => {
+                        const option = document.createElement('option');
+                        option.value = location;
+                        option.textContent = location;
+                        locationSelect.appendChild(option);
+                    });
+                })
+                .catch(error => console.error('Error:', error));
+        } else {
+            // 선택된 층이나 열이 없을 경우 위치 초기화
+            document.getElementById('location-select').innerHTML = '<option value="">위치 선택</option>';
+        }
+    });
+    // 페이지 로드 시 자동으로 fetch-data 버튼 클릭 이벤트 발생
+    window.onload = function() {
+        {% if auto_fetch %}
+        document.getElementById('fetch-data').click();
+        {% endif %}
+    };
+    document.getElementById('fetch-data').addEventListener('click', function() {
+        const floor = document.getElementById('floor-select').value;
+        const column = document.getElementById('column-select').value;
+        const location = document.getElementById('location-select').value;
+
+        if (floor && column && location) {
+            fetch('/rackview', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `floor=${floor}&column=${column}&location=${location}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                const tbody = document.getElementById('equipment-table-body');
+                tbody.innerHTML = ''; // 기존 데이터 삭제
+
+                // 각 항목을 순회
+                data.forEach(item => {
+                    // rowspan이 1보다 큰 경우
+                    if (item.usize > 1) {
+                        // rowspan 값을 기준으로 행 추가
+                        for (let i = 0; i < item.usize; i++) {
+                            const row = document.createElement('tr');
+
+                            // 첫 번째 행에는 rowspan 적용
+                            if (i === 0) {
+                                // pnum 값이 있는 경우 클릭 이벤트 추가
+                                const pnums = item.pnum ? item.pnum.split(',') : [];
+                                const hasClickEvent = pnums.length > 0;
+
+                                // 클릭 이벤트가 있는 경우 클래스 추가
+                                if (hasClickEvent) {
+                                    row.classList.add('clickable-row');
+                                    row.dataset.pnums = item.pnum;
+                                }
+
+                                row.innerHTML = `
+                                    <td>${item.loc2}</td>
+                                    <td rowspan='${item.usize}'>${item.maker} ${item.model}</td>
+                                    <td rowspan='${item.usize}'>${item.servername}</td>
+                                    <td rowspan='${item.usize}'>${item.charge}</td>
+                                `;
+                            } else {
+                                // 이후 행에는 loc2만 추가하고 나머지는 빈 셀
+                                row.innerHTML = `<td>${item.loc2 - i}</td>`;
+                            }
+                            tbody.appendChild(row);
+                        }
+                    } else {
+                        // rowspan이 1인 경우
+                        const row = document.createElement('tr');
+
+                        // pnum 값이 있는 경우 클릭 이벤트 추가
+                        if (item.pnum) {
+                            row.classList.add('clickable-row');
+                            row.dataset.pnums = item.pnum;
+                        }
+
+                        row.innerHTML = `
+                            <td>${item.loc2}</td>
+                            <td>${item.maker} ${item.model}</td>
+                            <td>${item.servername}</td>
+                            <td>${item.charge}</td>
+                        `;
+                        tbody.appendChild(row);
+                    }
+                });
+
+                // 클릭 이벤트 추가
+                document.querySelectorAll('.clickable-row').forEach(row => {
+                    row.addEventListener('click', function() {
+                        const pnums = this.dataset.pnums.split(',');
+                        if (pnums.length === 1) {
+                            // 단일 자산인 경우 바로 이동
+                            window.location.href = `/edit/${pnums[0]}`;
+                        } else if (pnums.length > 1) {
+                            // 여러 자산이 있는 경우 선택 모달 표시
+                            showAssetSelectionModal(pnums);
+                        }
+                    });
+                });
+            })
+            .catch(error => console.error('Error:', error));
+        } else {
+            alert('모든 필드를 선택하세요.');
+        }
+    });
+
+    // 자산 선택 모달 표시 함수
+    function showAssetSelectionModal(pnums) {
+        // 기존 모달이 있으면 제거
+        const existingModal = document.getElementById('assetSelectionModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // 모달 생성
+        const modal = document.createElement('div');
+        modal.id = 'assetSelectionModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h3>자산 선택</h3>
+                <p>수정할 자산을 선택하세요:</p>
+                <div id="assetList"></div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // 자산 목록 가져오기
+        const assetList = document.getElementById('assetList');
+
+        // 각 pnum에 대한 자산 정보 가져오기
+        pnums.forEach(pnum => {
+            fetch(`/get_asset_details/${pnum}`)
+                .then(response => response.json())
+                .then(asset => {
+                    const assetItem = document.createElement('div');
+                    assetItem.className = 'asset-item';
+                    assetItem.innerHTML = `
+                        <p><strong>${asset.servername || '이름 없음'}</strong> (${asset.hostname || '호스트명 없음'}, ${asset.ip || 'IP 없음'})</p>
+                        <button class="select-asset-btn" data-pnum="${pnum}">선택</button>
+                    `;
+                    assetList.appendChild(assetItem);
+
+                    // 선택 버튼 이벤트
+                    assetItem.querySelector('.select-asset-btn').addEventListener('click', function() {
+                        window.location.href = `/edit/${this.dataset.pnum}`;
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching asset details:', error);
+                    assetList.innerHTML += `<p>자산 정보를 가져오는 중 오류가 발생했습니다. (ID: ${pnum})</p>`;
+                });
+        });
+
+        // 모달 표시
+        modal.style.display = 'block';
+
+        // 닫기 버튼 이벤트
+        modal.querySelector('.close').addEventListener('click', function() {
+            modal.style.display = 'none';
+        });
+
+        // 모달 외부 클릭 시 닫기
+        window.addEventListener('click', function(event) {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    }
+
+    document.getElementById('export-rack').addEventListener('click', function() {
+        const floor = document.getElementById('floor-select').value;
+        const column = document.getElementById('column-select').value;
+        const location = document.getElementById('location-select').value;
+
+        if (floor && column && location) {
+            fetch('/rack_export', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `floor=${floor}&column=${column}&location=${location}`
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.blob();
+                }
+                throw new Error('Network response was not ok.');
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'exported_rack_data.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(error => console.error('Error:', error));
+        } else {
+            alert('모든 필드를 선택하세요.');
+        }
+    });
+</script>
+<style>
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    th, td {
+        border: 1px solid black;
+        padding: 8px;
+        text-align: center;
+    }
+    th {
+        background-color: #f2f2f2;
+    }
+    .div_container {
+        min-width: 500px; /* 최소 너비 500px */
+        max-width: 1200px; /* 최대 너비 1200px */
+        width: 100%; /* 기본 너비는 100% */
+        margin: 0 auto; /* 가운데 정렬 */
+        padding: 20px;
+        border: 1px solid #000;
+        box-sizing: border-box; /* 패딩 포함한 너비 계산 */
+    }
+    .select_container {
+        display: flex; /* Flexbox 활성화 */
+        justify-content: space-between; /* 요소 간격 조절 */
+    }
+    .box {
+        width: 45%; /* 각 div의 너비 설정 */
+    }
+    .clickable-row {
+        cursor: pointer;
+    }
+    .clickable-row:hover {
+        background-color: #f5f5f5;
+    }
+    /* 모달 스타일 */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0,0,0,0.4);
+    }
+    .modal-content {
+        background-color: #fefefe;
+        margin: 15% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 50%;
+        border-radius: 5px;
+    }
+    .close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+    .close:hover,
+    .close:focus {
+        color: black;
+        text-decoration: none;
+    }
+    .asset-item {
+        padding: 10px;
+        margin: 5px 0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .select-asset-btn {
+        padding: 5px 10px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    .select-asset-btn:hover {
+        background-color: #0056b3;
+    }
+</style>
+{% endblock %}

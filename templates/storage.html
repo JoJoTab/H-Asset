@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6">
+        <h2>스토리지 관리</h2>
+    </div>
+    <div class="col-md-6 text-right">
+        <div>
+            <h5>업데이트 날짜: {{ latest_date }}</h5>
+            <button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#storage_upload">수동등록</button>
+        </div>
+    </div>
+</div>
+<hr width="100%" class="divider"/>
+<div>
+    <div class="row">
+        <div class="col-md-6" style="min-width: 950px; min-height: 400px;">
+            <div class="my-3">
+                <div>
+                    <!-- 날짜 입력 폼 -->
+                    <form method="POST" action="/storage">
+                        <div class="form-group">
+                            <label for="start_date">시작 날짜:</label>
+                            <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="end_date">종료 날짜:</label>
+                            <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
+                        </div>
+                        <button type="submit" class="btn btn-primary">조회</button>
+                    </form>
+                    <div>
+                        {% for storage, pools in data1.items() %}
+                        <hr>
+                        <div class="p-1 mb-3">
+                            <h4>{{ storage }}</h4>
+                            <table class="storage_display" style="width:100%">
+                                <thead>
+                                    <tr>
+                                        <th>Pool</th>
+                                        <th>전체용량 (TB)</th>
+                                        <th>할당량 (TB)</th>
+                                        <th>가용량 (TB)</th>
+                                        <th>할당률 (%)</th>
+                                        <th>사용률 (%)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for pid, info in pools.items() %}
+                                    <tr>
+                                        <td>{{ pid }}</td>
+                                        <td>{{ info.TP_CAP | round(2) }} {{ info.TP_CAP_diff if info.TP_CAP_diff is not none else '' }}</td>
+                                        <td>{{ info.TL_CAP | round(2) }} {{ info.TL_CAP_diff if info.TL_CAP_diff is not none else '' }}</td>
+                                        <td>{{ info.AV_CAP | round(2) }} {{ info.AV_CAP_diff if info.AV_CAP_diff is not none else '' }}</td>
+                                        <td>{{ info.TL_RATE | round(2) }}</td>
+                                        <td>{{ info.USE_RATE | round(2) }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6" style="min-width: 950px; min-height: 400px;">
+            <div class="my-3">
+                <div>
+                    <h4>할당률</h4>
+                    {{ graph_html_tl | safe }}
+                </div>
+                <div>
+                    <h4>사용률</h4>
+                    {{ graph_html_use | safe }}
+                </div>
+            </div>
+            <hr/>
+            <div>
+                <h4>용량검색</h4>
+                <table id="storage_table" class="display" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>날짜</th>
+                            <th>스토리지</th>
+                            <th>Pool</th>
+                            <th>가용량(TB)</th>
+                            <th>전체용량(TB)</th>
+                            <th>할당량(TB)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for asset in data2 %}
+                        <tr>
+                            <td>{{ asset.DATEIN }}</td>
+                            <td>{{ asset.STORAGE }}</td>
+                            <td>{{ asset.PID }}</td>
+                            <td>{{ asset.AV_CAP }}</td>
+                            <td>{{ asset.TP_CAP }}</td>
+                            <td>{{ asset.TL_CAP }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- 오류 메시지 표시 -->
+{% if error_message %}
+<div class="alert alert-danger" role="alert">
+    {{ error_message }}
+</div>
+{% endif %}
+<!-- 수동 업로드 모달 -->
+<div class="modal fade" id="storage_upload" tabindex="-1" role="dialog" aria-labelledby="uploadModal" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form action="/storage_upload" method="POST" enctype="multipart/form-data">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="uploadModalLabel">파일 업로드</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <input type="file" name="file" accept=".txt" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">업로드</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+    $(document).ready(function() {
+        $('.storage_display').DataTable({
+            paging: false,
+            searching: false,
+            info: false
+        });
+    });
+    $(document).ready(function() {
+        $('#storage_table').DataTable();
+    });
+</script>
+{% endblock %}

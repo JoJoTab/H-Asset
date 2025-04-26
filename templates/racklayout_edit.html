@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>상면 정보 수정</h1>
+<hr width="100%" class="divider"/>
+<hr>
+<div class="text-right py-2">
+    <a href="{{ url_for('racklayout') }}" class="btn btn-secondary">돌아가기</a>
+</div>
+<div class="container">
+    <form method="POST">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th scope="col">상면 위치</th>
+                    <th scope="col">랙명 또는 용도</th>
+                    <th scope="col">사용 여부</th>
+                    <th scope="col">수정</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for loc in loc_list %}
+                <tr>
+                    <td>{{ loc }}</td>
+                    <td>
+                        <input type="text" class="form-control" name="rackname_{{ loc }}"
+                               value="{{ current_dict.get(loc, ('', 1))[0] }}">
+                    </td>
+                    <td>
+                        <select class="form-control" name="rackenable_{{ loc }}">
+                            <option value="1" {% if current_dict.get(loc, ('', 1))[1] == 1 %}selected{% endif %}>사용</option>
+                            <option value="2" {% if current_dict.get(loc, ('', 1))[1] == 2 %}selected{% endif %}>미사용</option>
+                            <option value="3" {% if current_dict.get(loc, ('', 1))[1] == 3 %}selected{% endif %}>사용불가</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button type="submit" class="btn btn-primary" name="update" value="{{ loc }}">수정</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </form>
+</div>
+{% endblock %}

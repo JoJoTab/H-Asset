@@ -1,0 +1,16 @@
+Flask==2.0.1
+aiomysql==0.2.0
+aiofiles==23.2.1
+redis==5.0.1
+pandas==2.1.1
+numpy==1.26.0
+plotly==5.18.0
+openpyxl==3.1.2
+flask-wtf==1.2.1
+pymysql==1.1.0
+python-dotenv==1.0.0
+Werkzeug==2.0.1
+Jinja2==3.0.1
+itsdangerous==2.0.1
+click==8.0.1
+flask-cors==3.0.10

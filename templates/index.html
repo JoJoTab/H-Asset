@@ -1,0 +1,233 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>자산 관리</h1>
+<hr width="100%" class="divider"/>
+
+<div class="row">
+    <div class="col-md-6 col-xl-3 mb-4">
+        <div class="card border-primary text-center h-100">
+            <div class="card-header bg-primary text-white">
+                총 자산
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.total_assets }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3 mb-4">
+        <div class="card border-success text-center h-100">
+            <div class="card-header bg-success text-white">
+                총 서버
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.total_servers }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3 mb-4">
+        <div class="card border-info text-center h-100">
+            <div class="card-header bg-info text-white">
+                물리 서버
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.physical_servers }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3 mb-4">
+        <div class="card border-warning text-center h-100">
+            <div class="card-header bg-warning text-dark">
+                가상 서버
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.virtual_servers }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3 mb-4">
+        <div class="card border-danger text-center h-100">
+            <div class="card-header bg-danger text-white">
+                {{ data_card.current_year }}년 도입
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.current_year_assets }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3 mb-4">
+        <div class="card border-dark text-center h-100">
+            <div class="card-header bg-dark text-white">
+                {{ data_card.current_month }}월 도입
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.current_month_assets }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3 mb-4">
+        <div class="card border-secondary text-center h-100">
+            <div class="card-header bg-secondary text-white">
+                (운영/QA/개발)
+            </div>
+            <div class="card-body">
+                <h5 class="card-title">
+                    <span class="badge badge-primary">{{ data_card.oper_assets }}</span> /
+                    <span class="badge badge-success">{{ data_card.qa_assets }}</span> /
+                    <span class="badge badge-info">{{ data_card.dev_assets }}</span>
+                </h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3 mb-4">
+        <div class="card border-secondary text-center h-100">
+            <div class="card-header bg-secondary text-white">
+                센터구분 (IDC/DR)
+            </div>
+            <div class="card-body">
+                <h5 class="card-title">
+                    <span class="badge badge-primary">{{ data_card.oper_assets + data_card.qa_assets + data_card.dev_assets }}</span> /
+                    <span class="badge badge-danger">{{ data_card.dr_assets }}</span>
+                </h5>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">자산 분포 그래프</h5>
+            </div>
+            <div class="card-body">
+                {% if graph %}
+                    <div>{{ graph | safe }}</div>
+                {% else %}
+                    <h2>그래프가 없습니다.</h2>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">자산 변경 내역</h5>
+                <div>
+                    <button type="button" id="selectAllBtn" class="btn btn-sm btn-light mr-2">전체 선택</button>
+                    <button type="button" id="deselectAllBtn" class="btn btn-sm btn-light mr-2">전체 해제</button>
+                    <button type="submit" form="updateIsFixForm" class="btn btn-sm btn-success">확인 완료</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <form id="updateIsFixForm" action="{{ url_for('asset.update_isfix') }}" method="POST">
+                    <div class="table-responsive">
+                        <table id="total_asset" class="display table table-striped table-hover" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>
+                                        <div class="custom-control custom-checkbox">
+                                            <input type="checkbox" class="custom-control-input" id="selectAll">
+                                            <label class="custom-control-label" for="selectAll"></label>
+                                        </div>
+                                    </th>
+                                    <th>도메인</th>
+                                    <th>서버명</th>
+                                    <th>IP 주소</th>
+                                    <th>호스트 이름</th>
+                                    <th>OS</th>
+                                    <th>상면번호</th>
+                                    <th>상단번호</th>
+                                    <th>담당자(정)</th>
+                                    <th>업데이트 일자</th>
+                                    <th>자세히</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for asset in data %}
+                                <tr>
+                                    <td>
+                                        <div class="custom-control custom-checkbox">
+                                            <input type="checkbox" class="custom-control-input asset-checkbox" id="asset{{ asset.pnum }}" name="selected_assets[]" value="{{ asset.pnum }}">
+                                            <label class="custom-control-label" for="asset{{ asset.pnum }}"></label>
+                                        </div>
+                                    </td>
+                                    <td>{{ asset.domain_state }}</td>
+                                    <td>{{ asset.servername }}</td>
+                                    <td>{{ asset.ip }}</td>
+                                    <td>{{ asset.hostname }}</td>
+                                    <td>{{ asset.os_state }}</td>
+                                    <td>{{ asset.loc1 }}</td>
+                                    <td>{{ asset.loc2 }}</td>
+                                    <td>{{ asset.charge }}</td>
+                                    <td>{{ asset.dateupdate }}</td>
+                                    <td>
+                                        <a href="{{ url_for('asset.edit_asset', pnum=asset.pnum) }}" class="text-decoration-none">
+                                            <i class="fas fa-external-link-alt"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    $(document).ready(function() {
+        // 데이터테이블 초기화
+        var table = $('#total_asset').DataTable({
+            "language": {
+                "url": "{{ url_for('static', filename='js/korean.json') }}"
+            },
+            "pageLength": 25,
+            "order": [[ 9, "desc" ]],  // 업데이트 일자 기준 내림차순 정렬
+            "responsive": true,
+            "columnDefs": [
+                { "orderable": false, "targets": 0 }  // 첫 번째 열(체크박스)은 정렬 비활성화
+            ]
+        });
+
+        // 전체 선택 체크박스
+        $('#selectAll').on('click', function() {
+            $('.asset-checkbox').prop('checked', this.checked);
+        });
+
+        // 개별 체크박스가 변경될 때 전체 선택 체크박스 상태 업데이트
+        $('.asset-checkbox').on('change', function() {
+            $('#selectAll').prop('checked', $('.asset-checkbox:checked').length === $('.asset-checkbox').length);
+        });
+
+        // 전체 선택 버튼
+        $('#selectAllBtn').on('click', function() {
+            $('.asset-checkbox').prop('checked', true);
+            $('#selectAll').prop('checked', true);
+        });
+
+        // 전체 해제 버튼
+        $('#deselectAllBtn').on('click', function() {
+            $('.asset-checkbox').prop('checked', false);
+            $('#selectAll').prop('checked', false);
+        });
+
+        // 폼 제출 전 확인
+        $('#updateIsFixForm').on('submit', function(e) {
+            var selectedCount = $('.asset-checkbox:checked').length;
+            if (selectedCount === 0) {
+                e.preventDefault();
+                alert('확인할 자산을 선택해주세요.');
+                return false;
+            }
+
+            return confirm(selectedCount + '개의 자산을 확인 완료 처리하시겠습니까?');
+        });
+    });
+</script>
+{% endblock %}

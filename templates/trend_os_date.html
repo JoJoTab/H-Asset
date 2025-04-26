@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>통계(기간별OS)</h2>
+<hr width="100%" class="divider"/>
+<hr>
+<div>
+    <div class="row">
+        <div class="col-md-6 col-12" style="min-width: 850px">
+            <div>{{ graph1|safe }}</div>
+        </div>
+        <div class="col-md-6 col-12" style="min-width: 850px">
+            <div>{{ graph2|safe }}</div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6 col-12" style="min-width: 850px">
+            <div>{{ graph3|safe }}</div>
+        </div>
+        <div class="col-md-6 col-12" style="min-width: 850px">
+            <div>{{ graph4|safe }}</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

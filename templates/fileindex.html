@@ -1,0 +1,180 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>파일관리</h2>
+<hr width="100%" class="divider"/>
+<!--<div class="col-md-4 mt-3">-->
+<!--    <h3><i class="fa fa-folder-open fa-lg"></i>&nbsp;</h3>-->
+<!--</div>-->
+<!--<hr width="100%" class="divider"/>-->
+<div class="mr-5 text-md-right">
+    <span class="float-left mt-2 ml-5">
+        <h6>폴더: {{ pwd }}</h6>
+    </span>
+</div>
+<hr width="100%" class="divider"/>
+    <div class="container text-center">
+        <div class="row">
+            <div class="col-12">
+                <button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#uploadFileModal">업로드</button>
+                <button type="button" class="btn btn-outline-secondary" onclick="location.href='/fileindex?path={{ parent_path|urlencode }}'">.. (상위 디렉토리)</button>
+                <button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#createFolderModal">새 폴더</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="col-md-auto ml-5 mr-5">
+    <table class="table table-sm table-responsive-md table-hover text-center">
+        <thead>
+            <tr>
+                <th></th>
+                <th>이름</th>
+                <th></th>
+                <th>만든 날짜</th>
+                <th>마지막으로 수정한 날짜</th>
+                <th>파일 크기</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for info in infos %}
+            <tr>
+                {% if not info['isfile'] %}
+                    <td class="badge badge-pill badge-info align-middle">폴더</td>
+                    <td class="text-left"><a href="/fileindex?path={{ pwd|urlencode }}/{{ info['name']|urlencode }}">{{ info['name'] }}</a></td>
+                    <td>
+                        <button type="button" class="btn btn-danger" data-toggle="modal" data-target="#deleteFolderModal" data-folder="{{ info['name'] }}">삭제</button>
+                    </td>
+                    <td>{{ info['create'].strftime("%Y-%m-%d") }}</td>
+                    <td>{{ info['modify'].strftime("%Y-%m-%d") }}</td>
+                    <td>{{ info['size'] }}</td>
+                {% else %}
+                    <td class="badge badge-pill badge-light align-middle">{{ info['name'].split(".")[1].lower() }}</td>
+                    <td class="text-left"><a href="down/{{ info['name'] }}" class="text-reset">{{ info['name'] }}</a></td>
+                    <td>
+                        <button type="button" class="btn btn-warning" data-toggle="modal" data-target="#deleteFileModal" data-file="{{ info['name'] }}">삭제</button>
+                    </td>
+                    <td>{{ info['create'].strftime("%Y-%m-%d") }}</td>
+                    <td>{{ info['modify'].strftime("%Y-%m-%d") }}</td>
+                    <td>{{ info['size'] }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- 파일 업로드 모달 -->
+<div class="modal fade" id="uploadFileModal" tabindex="-1" role="dialog" aria-labelledby="uploadFileModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form action="/fileindex" method="POST" enctype="multipart/form-data">
+                {{ form.csrf_token() }}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="uploadFileModalLabel">파일 업로드</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    {{ form.files(size=20) }}  <!-- 파일 선택 창 파일 폼 출력 -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">업로드</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 파일 삭제 모달 -->
+<div class="modal fade" id="deleteFileModal" tabindex="-1" role="dialog" aria-labelledby="deleteFileModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form action="" method="POST" id="deleteFileForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="deleteFileModalLabel">파일 삭제 확인</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>해당 파일을 삭제하시겠습니까?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-danger">삭제</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 새 폴더 모달 -->
+<div class="modal fade" id="createFolderModal" tabindex="-1" role="dialog" aria-labelledby="createFolderModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form action="/fileindex" method="POST">
+                {{ form.csrf_token() }}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createFolderModalLabel">새 폴더 만들기</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" name="folder_name" class="form-control" placeholder="폴더 이름" required>
+                    <input type="hidden" name="create_folder" value="true">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">생성</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 폴더 삭제 모달 -->
+<div class="modal fade" id="deleteFolderModal" tabindex="-1" role="dialog" aria-labelledby="deleteFolderModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form action="/fileindex" method="POST">
+                <input type="hidden" name="folder_name" id="deleteFolderName">
+                <input type="hidden" name="delete_folder" value="true">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="deleteFolderModalLabel">폴더 삭제 확인</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>폴더를 삭제하시겠습니까? 폴더 하위의 모든 데이터가 삭제됩니다.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-danger">삭제</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<div id="response" class="mt-3"></div>
+<script>
+    // 파일 삭제 모달에서 파일 이름 설정
+    $('#deleteFileModal').on('show.bs.modal', function(event) {
+        var button = $(event.relatedTarget);
+        var fileName = button.data('file');
+        var action = '/del/' + fileName;  // 삭제할 파일의 URL
+        $('#deleteFileForm').attr('action', action); // 폼의 액션 설정
+    });
+
+    // 폴더 삭제 모달에서 폴더 이름 설정
+    $('#deleteFolderModal').on('show.bs.modal', function(event) {
+        var button = $(event.relatedTarget);
+        var folderName = button.data('folder');
+        $('#deleteFolderName').val(folderName); // 폴더 이름 설정
+    });
+</script>
+{% endblock %}

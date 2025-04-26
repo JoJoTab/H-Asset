@@ -1,0 +1,570 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>상세 검색</h2>
+<hr width="100%" class="divider"/>
+<hr>
+<div>
+    <button class="btn btn-outline-info col-12" id="toggleSearch">상세 검색 열기</button>
+</div>
+<div class="contents" id="searchFields" style="display: none;">
+    <form action="{{ url_for('asset.index_detail') }}" method="POST">
+        <div class="row">
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="itamnum">ITAM자산번호:</label>
+                    <input type="text" class="form-control" id="itamnum" name="itamnum">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="servername">서버명:</label>
+                    <input type="text" class="form-control" id="servername" name="servername">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="ip">IP 주소:</label>
+                    <input type="text" class="form-control" id="ip" name="ip">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="hostname">호스트 이름:</label>
+                    <input type="text" class="form-control" id="hostname" name="hostname">
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="center">센터:</label>
+                    <input type="text" class="form-control" id="center" name="center">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="loc1">상면번호:</label>
+                    <input type="text" class="form-control" id="loc1" name="loc1">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="loc2">상단번호:</label>
+                    <input type="number" class="form-control" id="loc2" name="loc2">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="isvm">VM 여부:</label>
+                    <select class="form-control" id="isvm" name="isvm">
+                        <option value="">모두</option>
+                        <option value="0">아니오</option>
+                        <option value="1">예</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="charge">담당자(정):</label>
+                    <input type="text" class="form-control" id="charge" name="charge">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="charge2">담당자(부):</label>
+                    <input type="text" class="form-control" id="charge2" name="charge2">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="os">OS:</label>
+                    <select class="form-control" id="os" name="os">
+                        <option value="">모두</option>
+                        <option value="Linux">Linux</option>
+                        <option value="Windows">Windows</option>
+                        <option value="AIX">AIX</option>
+                        <option value="HP-UX">HP-UX</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="osver">OS버전:</label>
+                    <input type="text" class="form-control" id="osver" name="osver">
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="serial">시리얼넘버:</label>
+                    <input type="text" class="form-control" id="serial" name="serial">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="power">전원 이중화:</label>
+                    <select class="form-control" id="power" name="power">
+                        <option value="">모두</option>
+                        <option value="0">전원미사용</option>
+                        <option value="1">이중화</option>
+                        <option value="2">단일</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="charge3">현업 담당자:</label>
+                    <input type="text" class="form-control" id="charge3" name="charge3">
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-6 text-left">
+                <a href="{{ url_for('asset.write_asset') }}" class="btn btn-success btn-sm">자산 추가</a>
+                <a href="{{ url_for('asset.export_asset') }}" class="btn btn-light btn-sm">내보내기</a>
+            </div>
+            <div class="col-md-6 text-right">
+                <button type="button" class="btn btn-secondary btn-sm" data-toggle="modal" data-target="#columnSelectModal">열 선택</button>
+                <button type="submit" class="btn btn-primary btn-sm">검색</button>
+            </div>
+        </div>
+    </form>
+    <hr>
+</div>
+<!-- 열 선택 모달 -->
+<div class="modal fade" id="columnSelectModal" tabindex="-1" role="dialog" aria-labelledby="columnSelectModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="columnSelectModalLabel">표시할 열 선택</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="columnSelectForm">
+                    <div class="row">
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="domain" {% if selected_columns and 'domain' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">도메인</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="servername" {% if selected_columns and 'servername' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">서버명</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="ip" {% if selected_columns and 'ip' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">IP 주소</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="hostname" {% if selected_columns and 'hostname' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">호스트명</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="os" {% if selected_columns and 'os' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">OS</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="isoper" {% if selected_columns and 'isoper' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">운영상태</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="osver" {% if selected_columns and 'osver' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">OS버전</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="center" {% if selected_columns and 'center' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">센터</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="loc1" {% if selected_columns and 'loc1' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">상면번호</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="loc2" {% if selected_columns and 'loc2' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">상단번호</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="charge" {% if selected_columns and 'charge' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">담당(정)</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="oper" {% if selected_columns and 'oper' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">운영구분</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="charge2" {% if selected_columns and 'charge2' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">담당(부)</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="charge3" {% if selected_columns and 'charge3' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">현업담당자</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="isvm" {% if selected_columns and 'isvm' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">VM 여부</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="vcenter" {% if selected_columns and 'vcenter' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">상위자산</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="power" {% if selected_columns and 'power' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">전원이중화</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="pdu" {% if selected_columns and 'pdu' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">PDU</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="maker" {% if selected_columns and 'maker' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">제조사</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="datein" {% if selected_columns and 'datein' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">설치일자</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="dateout" {% if selected_columns and 'dateout' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">폐기일자</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="model" {% if selected_columns and 'model' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">모델명</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="itamnum" {% if selected_columns and 'itamnum' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">ITAM자산번호</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="serial" {% if selected_columns and 'serial' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">시리얼넘버</label>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+                <button type="button" class="btn btn-primary" id="applyColumnSelection">적용</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 자산 상세 정보 모달 -->
+<div class="modal fade" id="assetDetailModal" tabindex="-1" role="dialog" aria-labelledby="assetDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="assetDetailModalLabel">자산 상세 정보</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" id="assetDetailContent">
+                <div class="text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="sr-only">로딩중...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a href="#" id="editAssetLink" class="btn btn-primary">수정</a>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="contents">
+    <table id="total_asset" class="display" style="width:100%">
+        <thead>
+            <tr id="table-header">
+                <!-- 헤더는 JavaScript로 동적 생성 -->
+            </tr>
+        </thead>
+        <tbody>
+            <!-- 데이터는 JavaScript로 동적 생성 -->
+        </tbody>
+    </table>
+</div>
+<style>
+    .contents{
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        text-center;
+    }
+    .detail-link {
+        cursor: pointer;
+        color: #007bff;
+    }
+    .detail-link:hover {
+        text-decoration: underline;
+    }
+    #assetDetailContent table {
+        width: 100%;
+    }
+    #assetDetailContent table th {
+        width: 20%;
+        background-color: #f8f9fa;
+    }
+    .parent-asset-link {
+        color: #007bff;
+        cursor: pointer;
+        text-decoration: underline;
+    }
+</style>
+<script>
+    $(document).ready(function() {
+        $('#toggleSearch').on('click', function() {
+            $('#searchFields').toggle(); // 상세 검색 입력 창을 표시하거나 숨깁니다.
+            var buttonText = $(this).text() === '상세 검색 열기' ? '상세 검색 닫기' : '상세 검색 열기';
+            $(this).text(buttonText); // 버튼 텍스트 변경
+        });
+
+        // 선택된 열 정보 가져오기
+        var selectedColumns = {{ selected_columns|tojson }};
+
+        // 열 매핑 정보 가져오기
+        var columnMapping = {{ column_mapping|tojson }};
+
+        // 테이블 헤더 생성
+        var headerRow = $('#table-header');
+        headerRow.empty();
+
+        // 선택된 열에 대한 헤더 추가
+        selectedColumns.forEach(function(column) {
+            if (columnMapping[column]) {
+                headerRow.append('<th>' + columnMapping[column] + '</th>');
+            }
+        });
+
+        // 자세히 열 추가
+        headerRow.append('<th>자세히</th>');
+
+        // 데이터 테이블 초기화
+        var table = $('#total_asset').DataTable({
+            data: {{ data|tojson }},
+            columns: (function() {
+                var columns = [];
+
+                // 선택된 열에 대한 컬럼 정의 추가
+                selectedColumns.forEach(function(column) {
+                    if (column === 'domain') {
+                        columns.push({ data: 'domain_state' });
+                    } else if (column === 'isoper') {
+                        columns.push({ data: 'isoper_state' });
+                    } else if (column === 'oper') {
+                        columns.push({ data: 'oper_state' });
+                    } else if (column === 'power') {
+                        columns.push({ data: 'power_state' });
+                    } else if (column === 'os') {
+                        columns.push({ data: 'os_state' });
+                    } else {
+                        columns.push({ data: column });
+                    }
+                });
+
+                // 자세히 열 추가
+                columns.push({
+                    data: 'pnum',
+                    render: function(data, type, row) {
+                        return '<a href="/edit/' + data + '" class="text-decoration-none"><img src="{{ url_for("static", filename="icon/box-arrow-in-up-right.svg") }}" alt="자세히" width="16" height="16" class="align-text-bottom"></a>';
+                    }
+                });
+
+                return columns;
+            })(),
+            pageLength: 25,
+            language: {
+                url: "{{ url_for('static', filename='js/korean.json') }}"
+            }
+        });
+
+        // 체크박스 상태에 따라 열 보이기/숨기기
+        $('#applyColumnSelection').on('click', function() {
+            // 체크된 체크박스 값 가져오기
+            var selectedColumns = $('#columnSelectForm input[name="columns"]:checked').map(function() {
+                return this.value;
+            }).get();
+
+            // 현재 URL 가져오기
+            var url = new URL(window.location.href);
+
+            // 기존 columns 파라미터 제거
+            url.searchParams.delete('columns');
+
+            // 선택된 열 파라미터 추가
+            selectedColumns.forEach(function(column) {
+                url.searchParams.append('columns', column);
+            });
+
+            // 페이지 이동
+            window.location.href = url.toString();
+        });
+
+        // 자세히 링크 클릭 이벤트
+        // $('#total_asset').on('click', '.detail-link', function() {
+        //     var pnum = $(this).data('pnum');
+
+        //     // 모달 열기
+        //     $('#assetDetailModal').modal('show');
+
+        //     // 상세 정보 가져오기
+        //     $.ajax({
+        //         url: '/get_asset_details/' + pnum,
+        //         method: 'GET',
+        //         success: function(data) {
+        //             // 상세 정보 표시
+        //             var content = '<table class="table table-bordered">';
+
+        //             // 모든 필드 표시
+        //             for (var key in data) {
+        //                 if (data.hasOwnProperty(key) && key !== 'parent_asset') {
+        //                     var displayKey = columnMapping[key] || key;
+        //                     var value = data[key];
+
+        //                     // 특수 필드 처리
+        //                     if (key === 'isvm') {
+        //                         value = value === 1 ? '예' : '아니오';
+        //                     } else if (key === 'vcenter' && data['isvm'] === 1 && data['parent_asset']) {
+        //                         // 상위 자산 정보가 있는 경우 링크로 표시
+        //                         var parentAsset = data['parent_asset'];
+        //                         value = '<span class="parent-asset-link" data-pnum="' + parentAsset.pnum + '">' +
+        //                                parentAsset.servername + ' (' + parentAsset.hostname + ', ' + parentAsset.ip + ')</span>';
+        //                     }
+
+        //                     content += '<tr><th>' + displayKey + '</th><td>' + (value !== null ? value : '') + '</td></tr>';
+        //                 }
+        //             }
+
+        //             content += '</table>';
+
+        //             // 모달 내용 ���데이트
+        //             $('#assetDetailContent').html(content);
+
+        //             // 수정 링크 업데이트
+        //             $('#editAssetLink').attr('href', '/edit/' + pnum);
+        //         },
+        //         error: function() {
+        //             $('#assetDetailContent').html('<div class="alert alert-danger">데이터를 불러오는 중 오류가 발생했습니다.</div>');
+        //         }
+        //     });
+        // });
+
+        // 상위 자산 링크 클릭 이벤트
+        // $(document).on('click', '.parent-asset-link', function() {
+        //     var pnum = $(this).data('pnum');
+
+        //     // 현재 모달 닫기
+        //     $('#assetDetailModal').modal('hide');
+
+        //     // 약간의 지연 후 새 모달 열기 (애니메이션 충돌 방지)
+        //     setTimeout(function() {
+        //         // 상위 ��산 상세 정보 가져오기
+        //         $.ajax({
+        //             url: '/get_asset_details/' + pnum,
+        //             method: 'GET',
+        //             success: function(data) {
+        //                 // 모달 열기
+        //                 $('#assetDetailModal').modal('show');
+
+        //                 // 상세 정보 표시
+        //                 var content = '<table class="table table-bordered">';
+
+        //                 // 모든 필드 표시
+        //                 for (var key in data) {
+        //                     if (data.hasOwnProperty(key) && key !== 'parent_asset') {
+        //                         var displayKey = columnMapping[key] || key;
+        //                         var value = data[key];
+
+        //                         // 특수 필드 처리
+        //                         if (key === 'isvm') {
+        //                             value = value === 1 ? '예' : '아니오';
+        //                         } else if (key === 'vcenter' && data['isvm'] === 1 && data['parent_asset']) {
+        //                             // 상위 자산 정보가 있는 경우 링크로 표시
+        //                             var parentAsset = data['parent_asset'];
+        //                             value = '<span class="parent-asset-link" data-pnum="' + parentAsset.pnum + '">' +
+        //                                    parentAsset.servername + ' (' + parentAsset.hostname + ', ' + parentAsset.ip + ')</span>';
+        //                         }
+
+        //                         content += '<tr><th>' + displayKey + '</th><td>' + (value !== null ? value : '') + '</td></tr>';
+        //                     }
+        //                 }
+
+        //                 content += '</table>';
+
+        //                 // 모달 내용 업데이트
+        //                 $('#assetDetailContent').html(content);
+
+        //                 // 수정 링크 업데이트
+        //                 $('#editAssetLink').attr('href', '/edit/' + pnum);
+        //             },
+        //             error: function() {
+        //                 $('#assetDetailContent').html('<div class="alert alert-danger">데이터를 불러오는 중 오류가 발생했습니다.</div>');
+        //             }
+        //         });
+        //     }, 300);
+        // });
+    });
+</script>
+
+{% endblock %}

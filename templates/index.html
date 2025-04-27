@@ -5,7 +5,8 @@
 <hr width="100%" class="divider"/>
 
 <div class="row">
-    <div class="col-md-6 col-xl-3 mb-4">
+    <!-- 첫 번째 줄: 6개의 카드 -->
+    <div class="col-md-4 col-xl-2 mb-4">
         <div class="card border-primary text-center h-100">
             <div class="card-header bg-primary text-white">
                 총 자산
@@ -15,7 +16,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6 col-xl-3 mb-4">
+    <div class="col-md-4 col-xl-2 mb-4">
         <div class="card border-success text-center h-100">
             <div class="card-header bg-success text-white">
                 총 서버
@@ -25,7 +26,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6 col-xl-3 mb-4">
+    <div class="col-md-4 col-xl-2 mb-4">
         <div class="card border-info text-center h-100">
             <div class="card-header bg-info text-white">
                 물리 서버
@@ -35,7 +36,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6 col-xl-3 mb-4">
+    <div class="col-md-4 col-xl-2 mb-4">
         <div class="card border-warning text-center h-100">
             <div class="card-header bg-warning text-dark">
                 가상 서버
@@ -45,7 +46,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6 col-xl-3 mb-4">
+    <div class="col-md-4 col-xl-2 mb-4">
         <div class="card border-danger text-center h-100">
             <div class="card-header bg-danger text-white">
                 {{ data_card.current_year }}년 도입
@@ -55,7 +56,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6 col-xl-3 mb-4">
+    <div class="col-md-4 col-xl-2 mb-4">
         <div class="card border-dark text-center h-100">
             <div class="card-header bg-dark text-white">
                 {{ data_card.current_month }}월 도입
@@ -65,44 +66,125 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6 col-xl-3 mb-4">
-        <div class="card border-secondary text-center h-100">
-            <div class="card-header bg-secondary text-white">
-                (운영/QA/개발)
+
+    <!-- 두 번째 줄: 6개의 카드 -->
+    <div class="col-md-4 col-xl-2 mb-4">
+        <div class="card border-primary text-center h-100">
+            <div class="card-header bg-primary text-white">
+                운영
             </div>
             <div class="card-body">
-                <h5 class="card-title">
-                    <span class="badge badge-primary">{{ data_card.oper_assets }}</span> /
-                    <span class="badge badge-success">{{ data_card.qa_assets }}</span> /
-                    <span class="badge badge-info">{{ data_card.dev_assets }}</span>
-                </h5>
+                <h5 class="card-title display-4">{{ data_card.oper_assets }}</h5>
             </div>
         </div>
     </div>
-    <div class="col-md-6 col-xl-3 mb-4">
-        <div class="card border-secondary text-center h-100">
-            <div class="card-header bg-secondary text-white">
-                센터구분 (IDC/DR)
+    <div class="col-md-4 col-xl-2 mb-4">
+        <div class="card border-success text-center h-100">
+            <div class="card-header bg-success text-white">
+                QA
             </div>
             <div class="card-body">
-                <h5 class="card-title">
-                    <span class="badge badge-primary">{{ data_card.oper_assets + data_card.qa_assets + data_card.dev_assets }}</span> /
-                    <span class="badge badge-danger">{{ data_card.dr_assets }}</span>
-                </h5>
+                <h5 class="card-title display-4">{{ data_card.qa_assets }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2 mb-4">
+        <div class="card border-info text-center h-100">
+            <div class="card-header bg-info text-white">
+                개발
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.dev_assets }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2 mb-4">
+        <div class="card border-warning text-center h-100">
+            <div class="card-header bg-warning text-dark">
+                DR
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.dr_assets }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2 mb-4">
+        <div class="card border-danger text-center h-100">
+            <div class="card-header bg-danger text-white">
+                IDC
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.idc_assets }}</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2 mb-4">
+        <div class="card border-dark text-center h-100">
+            <div class="card-header bg-dark text-white">
+                DR 센터
+            </div>
+            <div class="card-body">
+                <h5 class="card-title display-4">{{ data_card.dr_center_assets }}</h5>
             </div>
         </div>
     </div>
 </div>
 
+<!-- 그래프 섹션 -->
 <div class="row mt-4">
-    <div class="col-12">
+    <!-- 첫 번째 줄: 2개의 그래프 -->
+    <div class="col-md-6 mb-4">
         <div class="card">
             <div class="card-header bg-primary text-white">
-                <h5 class="mb-0">자산 분포 그래프</h5>
+                <h5 class="mb-0">최근 1년간 누적 자산</h5>
             </div>
             <div class="card-body">
-                {% if graph %}
-                    <div>{{ graph | safe }}</div>
+                {% if graphs.graph1 %}
+                    <div>{{ graphs.graph1 | safe }}</div>
+                {% else %}
+                    <h2>그래프가 없습니다.</h2>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">최근 1년간 설치/폐기 자산</h5>
+            </div>
+            <div class="card-body">
+                {% if graphs.graph2 %}
+                    <div>{{ graphs.graph2 | safe }}</div>
+                {% else %}
+                    <h2>그래프가 없습니다.</h2>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 두 번째 줄: 2개의 그래프 -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">도메인별 자산 분포</h5>
+            </div>
+            <div class="card-body">
+                {% if graphs.graph3 %}
+                    <div>{{ graphs.graph3 | safe }}</div>
+                {% else %}
+                    <h2>그래프가 없습니다.</h2>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">서버 OS별 분포</h5>
+            </div>
+            <div class="card-body">
+                {% if graphs.graph4 %}
+                    <div>{{ graphs.graph4 | safe }}</div>
                 {% else %}
                     <h2>그래프가 없습니다.</h2>
                 {% endif %}
@@ -181,6 +263,11 @@
 </div>
 
 <script>
+    // Plotly.js가 로드되었는지 확인
+    if (typeof Plotly === 'undefined') {
+        document.write('<script src="https://cdn.plot.ly/plotly-latest.min.js"><\/script>');
+    }
+
     $(document).ready(function() {
         // 데이터테이블 초기화
         var table = $('#total_asset').DataTable({

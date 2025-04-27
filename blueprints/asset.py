@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, request, jsonify, flash
+from flask import Blueprint, render_template, redirect, url_for, request, jsonify, flash, send_file
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -6,7 +6,11 @@ import plotly.express as px
 from utils.db import execute_query, execute_many, get_db_connection
 from utils.cache import cache, invalidate_cache_pattern
 import os
-from flask import send_file
+from werkzeug.utils import secure_filename
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment, Protection
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 asset_bp = Blueprint('asset', __name__)
 
@@ -15,10 +19,10 @@ asset_bp = Blueprint('asset', __name__)
 def index():
     """자산 관리 메인 페이지"""
     # 데이터 카드 정보 가져오기
-    data_card = get_data()  # 비동기 함수를 동기 함수로 변경
+    data_card = get_data()
 
     # 그래프 데이터 가져오기
-    graph_html = generate_asset_graph()  # 비동기 함수를 동기 함수로 변경
+    graphs = generate_asset_graph()
 
     # 자산 데이터 가져오기
     sql = """
@@ -39,7 +43,7 @@ def index():
     """
     data = execute_query(sql)
 
-    return render_template('index.html', data_card=data_card, data=data, graph=graph_html)
+    return render_template('index.html', data_card=data_card, data=data, graphs=graphs)
 
 
 @asset_bp.route('/update_isfix', methods=['POST'])
@@ -62,8 +66,13 @@ def update_isfix():
 
 def get_data():
     """자산 데이터 통계 가져오기"""
-    # 데이터베이스 쿼리
-    query = "SELECT * FROM total_asset"
+    # 데이터베이스 쿼리 - isfix=0이고 사용여부가 '사용'인 자산만 조회
+    query = """
+        SELECT ta.*, io_isoper.state AS isoper_state 
+        FROM total_asset ta
+        LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
+        WHERE ta.isfix = 0 AND io_isoper.state = '사용'
+    """
     db = get_db_connection()
     try:
         with db.cursor() as cursor:
@@ -80,30 +89,43 @@ def get_data():
     df['datein'] = pd.to_datetime(df['datein'], errors='coerce')
 
     # 개수 계산
-    total_assets = df[df['isoper'].isin([0, 1, 2])]
-    total_servers = df[df['domain'] == 0]
-    physical_servers = df[(df['domain'] == 0) & (df['isvm'] == 0)]
-    virtual_servers = df[(df['domain'] == 0) & (df['isvm'] == 1)]
-    current_year_assets = df[pd.to_datetime(df['datein']).dt.year == pd.to_datetime('now').year]
-    current_month_assets = df[pd.to_datetime(df['datein']).dt.month == pd.to_datetime('now').month]
-    oper_assets = df[(df['domain'] == 0) & (df['oper'] == 0)]
-    qa_assets = df[(df['domain'] == 0) & (df['oper'] == 1)]
-    dev_assets = df[(df['domain'] == 0) & (df['oper'] == 2)]
-    dr_assets = df[(df['domain'] == 0) & (df['oper'] == 4)]
-    current_year = pd.to_datetime('now').year
-    current_month = pd.to_datetime('now').month
+    total_assets = len(df)
+    total_servers = len(df[df['domain'] == 0])
+    physical_servers = len(df[(df['domain'] == 0) & (df['isvm'] == 0)])
+    virtual_servers = len(df[(df['domain'] == 0) & (df['isvm'] == 1)])
+
+    # 현재 날짜 기준 계산
+    current_date = pd.to_datetime('now')
+    current_year = current_date.year
+    current_month = current_date.month
+
+    current_year_assets = len(df[pd.to_datetime(df['datein']).dt.year == current_year])
+    current_month_assets = len(df[(pd.to_datetime(df['datein']).dt.year == current_year) &
+                                  (pd.to_datetime(df['datein']).dt.month == current_month)])
+
+    # 운영구분별 자산 수
+    oper_assets = len(df[(df['domain'] == 0) & (df['oper'] == 0)])
+    qa_assets = len(df[(df['domain'] == 0) & (df['oper'] == 1)])
+    dev_assets = len(df[(df['domain'] == 0) & (df['oper'] == 2)])
+    dr_assets = len(df[(df['domain'] == 0) & (df['oper'] == 4)])
+
+    # 센터별 자산 수 (IDC/DR)
+    idc_assets = len(df[df['center'].str.contains('IDC', na=False)])
+    dr_center_assets = len(df[df['center'].str.contains('DR', na=False)])
 
     return {
-        "total_assets": len(total_assets),
-        "total_servers": len(total_servers),
-        "physical_servers": len(physical_servers),
-        "virtual_servers": len(virtual_servers),
-        "current_year_assets": len(current_year_assets),
-        "current_month_assets": len(current_month_assets),
-        "oper_assets": len(oper_assets),
-        "qa_assets": len(qa_assets),
-        "dev_assets": len(dev_assets),
-        "dr_assets": len(dr_assets),
+        "total_assets": total_assets,
+        "total_servers": total_servers,
+        "physical_servers": physical_servers,
+        "virtual_servers": virtual_servers,
+        "current_year_assets": current_year_assets,
+        "current_month_assets": current_month_assets,
+        "oper_assets": oper_assets,
+        "qa_assets": qa_assets,
+        "dev_assets": dev_assets,
+        "dr_assets": dr_assets,
+        "idc_assets": idc_assets,
+        "dr_center_assets": dr_center_assets,
         "current_year": current_year,
         "current_month": current_month
     }
@@ -111,7 +133,7 @@ def get_data():
 
 def generate_asset_graph():
     """자산 그래프 생성"""
-    # SQL 쿼리 작성
+    # SQL 쿼리 작성 - isfix=0이고 사용여부가 '사용'인 자산만 조회
     sql_graph = """
                 SELECT ta.*, 
                        id.state AS domain_state, 
@@ -125,6 +147,7 @@ def generate_asset_graph():
                 LEFT JOIN hli_asset.info_oper io_oper ON ta.oper = io_oper.oper
                 LEFT JOIN hli_asset.info_power io_power ON ta.power = io_power.power
                 LEFT JOIN hli_asset.info_os io_os ON ta.os = io_os.os
+                WHERE ta.isfix = 0 AND io_isoper.state = '사용'
                 ORDER BY ta.dateinsert
                 """
 
@@ -143,42 +166,139 @@ def generate_asset_graph():
     df_graph['datein'] = pd.to_datetime(df_graph['datein'])
     df_graph['dateout'] = pd.to_datetime(df_graph['dateout'])
 
-    # 월 단위로 집계
-    df_graph['month'] = df_graph['datein'].dt.to_period('M').astype(str)
+    # 최근 1년 데이터만 필터링
+    # one_year_ago = pd.Timestamp.now() - pd.DateOffset(years=1)
+    # df_recent = df_graph[df_graph['datein'] >= one_year_ago]
 
-    # 각 월별 설치 및 폐기 자산 수 집계
-    monthly_data = df_graph.groupby('month').agg(
-        installed=('os_state', 'size'),  # 설치된 자산 수
+    # 1. 최근 1년간 누적 자산 막대 그래프
+    # df_recent['month'] = df_recent['datein'].dt.to_period('M').astype(str)
+    # monthly_counts = df_recent.groupby(['month', 'domain_state']).size().unstack(fill_value=0)
+
+    # 누적 계산
+    # cumulative_counts = monthly_counts.cumsum()
+
+    # fig1 = px.bar(cumulative_counts, title='최근 1년간 누적 자산',
+    #              labels={'value': '개수', 'month': '월'}, barmode='stack')
+
+    # 최근 1년 기간 설정
+    one_year_ago = pd.Timestamp.now() - pd.DateOffset(years=1)
+
+    # 모든 자산에 월 정보 추가
+    df_graph['month'] = df_graph['datein'].dt.to_period('M')
+
+    # 1. 전체 자산의 최근 1년간 누적 그래프
+    # 최근 1년간의 월 목록 생성
+    recent_months = pd.period_range(start=one_year_ago, end=pd.Timestamp.now(), freq='M')
+
+    # 각 월별, 도메인별 누적 자산 계산
+    monthly_data = []
+
+    for month in recent_months:
+        # 해당 월 이전에 도입되고 (폐기되지 않았거나 해당 월 이후에 폐기된) 자산 필터링
+        month_end = month.to_timestamp(how='end')
+        valid_assets = df_graph[(df_graph['datein'] <= month_end) &
+                                ((df_graph['dateout'].isna()) | (df_graph['dateout'] > month_end))]
+
+        # 도메인별 자산 수 계산
+        domain_counts = valid_assets['domain_state'].value_counts()
+
+        # 결과 저장
+        for domain, count in domain_counts.items():
+            monthly_data.append({
+                'month': month.strftime('%Y-%m'),
+                'domain_state': domain,
+                'count': count
+            })
+
+    # 데이터프레임으로 변환
+    monthly_df = pd.DataFrame(monthly_data)
+
+    # 피벗 테이블로 변환
+    if not monthly_df.empty:
+        monthly_pivot = monthly_df.pivot_table(
+            index='month',
+            columns='domain_state',
+            values='count',
+            fill_value=0
+        ).reset_index()
+
+        fig1 = px.bar(monthly_pivot, x='month', y=monthly_pivot.columns[1:],
+                      title='전체 자산 현황 (최근 1년)',
+                      labels={'value': '개수', 'month': '월', 'variable': '도메인'},
+                      barmode='stack')
+    else:
+        # 데이터가 없는 경우 빈 그래프 생성
+        fig1 = px.bar(title='전체 자산 현황 (최근 1년)')
+        fig1.update_layout(
+            xaxis_title='월',
+            yaxis_title='개수'
+        )
+
+    # 2. 최근 1년간 설치/폐기 막대 그래프
+    df_recent = df_graph[df_graph['datein'] >= one_year_ago]
+    df_recent['month'] = df_recent['datein'].dt.to_period('M').astype(str)
+    monthly_data = df_recent.groupby('month').agg(
+        installed=('pnum', 'count'),  # 설치된 자산 수
         discarded=('dateout', lambda x: x.notnull().sum())  # 폐기된 자산 수
     ).reset_index()
 
-    # 누적 계산
-    monthly_data['cumulative_installed'] = monthly_data['installed'].cumsum()
-    monthly_data['cumulative_discarded'] = monthly_data['discarded'].cumsum()
+    # # 데이터 타입 일치시키기
+    # monthly_data['installed'] = monthly_data['installed'].astype(int)
+    # monthly_data['discarded'] = monthly_data['discarded'].astype(int)
 
-    # 총 자산 수 계산
-    monthly_data['total_assets'] = monthly_data['cumulative_installed'] - monthly_data['cumulative_discarded']
+    # wide-form에서 long-form으로 변환
+    monthly_data_long = pd.melt(
+        monthly_data,
+        id_vars=['month'],
+        value_vars=['installed', 'discarded'],
+        var_name='category',
+        value_name='count'
+    )
 
-    # 각 월의 OS 종류 및 state 정보 집계
-    df_graph['label'] = df_graph.apply(
-        lambda row: row['os_state'] if row['domain_state'] == '서버' else row['domain_state'], axis=1)
-    monthly_counts = df_graph.groupby(['month', 'label']).size().unstack(fill_value=0)
+    # 카테고리 이름 변경
+    category_names = {'installed': '설치', 'discarded': '폐기'}
+    monthly_data_long['category'] = monthly_data_long['category'].map(category_names)
 
-    # 누적 자산 수를 포함한 데이터프레임 생성
-    monthly_counts = monthly_counts.reindex(monthly_data['month'], fill_value=0)
-    cumulative_counts = monthly_counts.cumsum()
+    fig2 = px.bar(monthly_data_long, x='month', y='count', color='category',
+                  title='최근 1년간 설치/폐기 자산',
+                  labels={'count': '개수', 'month': '월', 'category': '구분'},
+                  barmode='group',
+                  color_discrete_map={'설치': 'green', '폐기': 'red'})
+    fig2.update_layout(legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1
+    ))
 
-    # x축을 6개로 제한
-    cumulative_counts = cumulative_counts.tail(6)
-    monthly_data = monthly_data.tail(6)
+    # 3. 도메인별 원형 그래프
+    domain_counts = df_graph['domain_state'].value_counts().reset_index()
+    domain_counts.columns = ['도메인', '개수']
 
-    fig = px.bar(cumulative_counts, title='전체자산변동', barmode='stack',
-                 labels={'value': '개수', 'month': '월'})
+    fig3 = px.pie(domain_counts, values='개수', names='도메인', title='도메인별 자산 분포')
+    fig3.update_traces(textposition='inside', textinfo='percent+label')
 
-    # 누적 총 자산 표시
-    fig.add_trace(px.line(monthly_data, x='month', y='total_assets', line_shape='linear').data[0])
+    # 4. 서버 도메인의 OS별 원형 그래프
+    server_df = df_graph[df_graph['domain_state'] == '서버']
+    os_counts = server_df['os_state'].value_counts().reset_index()
+    os_counts.columns = ['OS', '개수']
 
-    return fig.to_html(full_html=False)
+    fig4 = px.pie(os_counts, values='개수', names='OS', title='서버 OS별 분포')
+    fig4.update_traces(textposition='inside', textinfo='percent+label')
+
+    # HTML로 그래프 렌더링
+    graph1 = fig1.to_html(full_html=False, include_plotlyjs=False)
+    graph2 = fig2.to_html(full_html=False, include_plotlyjs=False)
+    graph3 = fig3.to_html(full_html=False, include_plotlyjs=False)
+    graph4 = fig4.to_html(full_html=False, include_plotlyjs=False)
+
+    return {
+        'graph1': graph1,
+        'graph2': graph2,
+        'graph3': graph3,
+        'graph4': graph4
+    }
 
 
 @asset_bp.route('/index_detail', methods=['GET', 'POST'])
@@ -546,7 +666,7 @@ def add_asset():
             # os
             cursor.execute("SELECT os FROM info_os WHERE state = %s", (os_state,))
             os_value = cursor.fetchone()
-            os = os_value['os'] if os_value else 0
+            os_code = os_value['os'] if os_value else 0
 
             # domain
             cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (domain_state,))
@@ -556,7 +676,7 @@ def add_asset():
             # 데이터 삽입
             cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
                                  isvm, vcenter, datein, dateout, charge, charge2,
-                                 isoper, oper, power, pdu, os, osver, maker, model, serial, domain, charge3,
+                                 isoper, oper, power, pdu, os_code, osver, maker, model, serial, domain, charge3,
                                  usize, cpucore, memory, isfix, dateupdate))
             db.commit()
     finally:
@@ -654,7 +774,7 @@ def edit_asset(pnum):
                 # os
                 cursor.execute("SELECT os FROM info_os WHERE state = %s", (os_state,))
                 os_value = cursor.fetchone()
-                os = os_value['os'] if os_value else None
+                os_code = os_value['os'] if os_value else None
 
                 # domain
                 cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (domain_state,))
@@ -664,7 +784,7 @@ def edit_asset(pnum):
                 # 데이터 업데이트
                 cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
                                      isvm, vcenter, datein, dateout, charge, charge2,
-                                     isoper, oper, power, pdu, os, osver, maker, model, serial, domain, charge3,
+                                     isoper, oper, power, pdu, os_code, osver, maker, model, serial, domain, charge3,
                                      usize, cpucore, memory, isfix, dateupdate, pnum))
                 db.commit()
         finally:
@@ -750,12 +870,73 @@ def delete_asset(pnum):
 @asset_bp.route('/export')
 def export_asset():
     """자산 데이터 내보내기"""
-    # 데이터베이스에서 자산 데이터 가져오기
-    sql = "SELECT * FROM total_asset"
+    # 데이터베이스에서 자산 데이터 가져오기 - JOIN을 사용하여 코드값 대신 설명 가져오기
+    sql = """
+        SELECT 
+            ta.pnum, ta.itamnum, ta.servername, ta.ip, ta.hostname, ta.center, 
+            ta.loc1, ta.loc2, ta.isvm, ta.vcenter, ta.datein, ta.dateout, 
+            ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
+            io_power.state AS power, ta.pdu, io_os.state AS os, ta.osver, 
+            ta.maker, ta.model, ta.serial, io_domain.state AS domain, ta.charge3,
+            ta.usize, ta.vmpnum, ta.dateinsert, ta.cpucore, ta.memory, ta.dateupdate, ta.isfix
+        FROM total_asset ta
+        LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
+        LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
+        LEFT JOIN info_power io_power ON ta.power = io_power.power
+        LEFT JOIN info_os io_os ON ta.os = io_os.os
+        LEFT JOIN info_domain io_domain ON ta.domain = io_domain.domain
+    """
     data = execute_query(sql)
 
     # 데이터프레임 생성
     df = pd.DataFrame(data)
+
+    # 컬럼명 한글로 변경
+    column_mapping = {
+        'pnum': '자산고유번호',
+        'itamnum': 'ITAM자산번호',
+        'servername': '서버명',
+        'ip': 'IP 주소',
+        'hostname': '호스트 이름',
+        'center': '센터',
+        'loc1': '상면번호',
+        'loc2': '상단번호',
+        'isvm': 'VM여부',
+        'vcenter': '상위 자산',
+        'datein': '설치일자',
+        'dateout': '폐기일자',
+        'charge': '담당자(정)',
+        'charge2': '담당자(부)',
+        'isoper': '사용여부',
+        'oper': '서비스구분',
+        'power': '전원이중화',
+        'pdu': 'PDU',
+        'os': 'OS',
+        'osver': 'OS버전',
+        'maker': '제조사',
+        'model': '모델',
+        'serial': '시리얼넘버',
+        'domain': '도메인',
+        'charge3': '현업담당자',
+        'usize': '장비크기',
+        'vmpnum': 'VM번호',
+        'dateinsert': '등록일시',
+        'cpucore': '물리코어',
+        'memory': '메모리크기',
+        'dateupdate': '업데이트일시',
+        'isfix': '변경확인'
+    }
+
+    # 컬럼명 변경
+    df.rename(columns=column_mapping, inplace=True)
+
+    # VM여부 값 변환 (0 -> '아니오', 1 -> '예')
+    if 'VM여부' in df.columns:
+        df['VM여부'] = df['VM여부'].map({0: '아니오', 1: '예'})
+
+    # 변경확인 값 변환 (0 -> '확인완료', 1 -> '확인필요')
+    if '변경확인' in df.columns:
+        df['변경확인'] = df['변경확인'].map({0: '확인완료', 1: '확인필요'})
 
     # 엑셀 파일로 저장
     today = datetime.now().strftime('%Y%m%d')
@@ -766,7 +947,472 @@ def export_asset():
     if not os.path.exists(os.path.dirname(export_filepath)):
         os.makedirs(os.path.dirname(export_filepath))
 
-    # 파일 저장
-    df.to_excel(export_filepath, index=False)
+    # 엑셀 파일 생성
+    with pd.ExcelWriter(export_filepath, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='자산목록')
+
+        # 열 너비 자동 조정
+        worksheet = writer.sheets['자산목록']
+        for i, column in enumerate(df.columns):
+            column_width = max(df[column].astype(str).map(len).max(), len(column) + 2)
+            worksheet.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = column_width
 
     return send_file(export_filepath, as_attachment=True)
+
+
+@asset_bp.route('/download_template')
+def download_template():
+    """자산 일괄 등록을 위한 엑셀 템플릿 다운로드"""
+    # 템플릿 파일 경로
+    template_path = os.path.join(os.getcwd(), 'exports', 'asset_template.xlsx')
+
+    # 템플릿 파일 생성
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "자산 등록"
+
+    # 스타일 정의
+    header_font = Font(name='맑은 고딕', size=11, bold=True, color='FFFFFF')
+    header_fill = PatternFill(start_color='4F81BD', end_color='4F81BD', fill_type='solid')
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    # 헤더 행 추가
+    headers = [
+        '서버명*', 'IP 주소*', '호스트 이름', 'ITAM자산번호', '센터', '상면번호', '상단번호',
+        'VM여부*', '설치일자', '폐기일자', '담당자(정)', '담당자(부)', '사용여부*',
+        '서비스구분*', '전원이중화', 'PDU', 'OS*', 'OS버전', '제조사', '모델',
+        '시리얼넘버', '도메인*', '현업담당자', '장비크기(U)', '물리코어', '메모리(GB)', '상위자산'
+    ]
+
+    # 필수 입력 필드 표시
+    required_fields = ['서버명*', 'IP 주소*', 'VM여부*', '사용여부*', '서비스구분*', 'OS*', '도메인*']
+
+    # 헤더 행 스타일 적용
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = center_alignment
+
+    # 열 너비 설정
+    for col_idx, header in enumerate(headers, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = max(len(header) * 1.5, 15)
+
+    # 데이터 유효성 검사 설정
+    # VM여부 (예/아니오)
+    vm_validation = DataValidation(type="list", formula1='"예,아니오"', allow_blank=True)
+    vm_validation.error = "VM여부는 '예' 또는 '아니오'만 선택 가능합니다."
+    vm_validation.errorTitle = "입력 오류"
+    ws.add_data_validation(vm_validation)
+    vm_validation.add(f"H2:H1000")
+
+    # 사용여부 드롭다운
+    isoper_options = execute_query("SELECT state FROM info_isoper")
+    isoper_list = ','.join([f'"{option["state"]}"' for option in isoper_options])
+    isoper_validation = DataValidation(type="list", formula1=f'"{isoper_list}"', allow_blank=True)
+    isoper_validation.error = "올바른 사용여부를 선택하세요."
+    isoper_validation.errorTitle = "입력 오류"
+    ws.add_data_validation(isoper_validation)
+    isoper_validation.add(f"M2:M1000")
+
+    # 서비스구분 드롭다운
+    oper_options = execute_query("SELECT state FROM info_oper")
+    oper_list = ','.join([f'"{option["state"]}"' for option in oper_options])
+    oper_validation = DataValidation(type="list", formula1=f'"{oper_list}"', allow_blank=True)
+    oper_validation.error = "올바른 서비스구분을 선택하세요."
+    oper_validation.errorTitle = "입력 오류"
+    ws.add_data_validation(oper_validation)
+    oper_validation.add(f"N2:N1000")
+
+    # 전원이중화 드롭다운
+    power_options = execute_query("SELECT state FROM info_power")
+    power_list = ','.join([f'"{option["state"]}"' for option in power_options])
+    power_validation = DataValidation(type="list", formula1=f'"{power_list}"', allow_blank=True)
+    power_validation.error = "올바른 전원이중화 옵션을 선택하세요."
+    power_validation.errorTitle = "입력 오류"
+    ws.add_data_validation(power_validation)
+    power_validation.add(f"O2:O1000")
+
+    # OS 드롭다운
+    os_options = execute_query("SELECT state FROM info_os")
+    os_list = ','.join([f'"{option["state"]}"' for option in os_options])
+    os_validation = DataValidation(type="list", formula1=f'"{os_list}"', allow_blank=True)
+    os_validation.error = "올바른 OS를 선택하세요."
+    os_validation.errorTitle = "입력 오류"
+    ws.add_data_validation(os_validation)
+    os_validation.add(f"Q2:Q1000")
+
+    # 도메인 드롭다운
+    domain_options = execute_query("SELECT state FROM info_domain")
+    domain_list = ','.join([f'"{option["state"]}"' for option in domain_options])
+    domain_validation = DataValidation(type="list", formula1=f'"{domain_list}"', allow_blank=True)
+    domain_validation.error = "올바른 도메인을 선택하세요."
+    domain_validation.errorTitle = "입력 오류"
+    ws.add_data_validation(domain_validation)
+    domain_validation.add(f"V2:V1000")
+
+    # 안내 시트 추가
+    guide_ws = wb.create_sheet(title="작성 가이드")
+    guide_ws['A1'] = "자산 일괄 등록 양식 작성 가이드"
+    guide_ws['A1'].font = Font(size=14, bold=True)
+    guide_ws.merge_cells('A1:F1')
+
+    guide_rows = [
+        ["* 표시된 항목은 필수 입력 항목입니다."],
+        ["VM여부는 '예' 또는 '아니오'로 입력해주세요."],
+        ["날짜는 YYYY-MM-DD 형식으로 입력해주세요. (예: 2023-01-01)"],
+        ["드롭다운 목록에서 선택 가능한 항목만 입력해주세요."],
+        ["상위자산은 VM이 '예'인 경우에만 입력하며, 물리 서버의 자산번호를 입력해주세요."],
+        [""],
+        ["각 필드 설명:"],
+        ["서버명", "서버의 이름을 입력합니다."],
+        ["IP 주소", "서버의 IP 주소를 입력합니다."],
+        ["호스트 이름", "서버의 호스트 이름을 입력합니다."],
+        ["ITAM자산번호", "ITAM 시스템의 자산 번호를 입력합니다."],
+        ["센터", "서버가 위치한 센터를 입력합니다."],
+        ["상면번호", "서버의 상면 번호를 입력합니다. (예: 1F-R01-01)"],
+        ["상단번호", "서버의 상단 번호를 입력합니다."],
+        ["VM여부", "가상 머신 여부를 '예' 또는 '아니오'로 선택합니다."],
+        ["설치일자", "서버 설치 일자를 YYYY-MM-DD 형식으로 입력합니다."],
+        ["폐기일자", "서버 폐기 일자를 YYYY-MM-DD 형식으로 입력합니다."],
+        ["담당자(정)", "주 담당자 이름을 입력합니다."],
+        ["담당자(부)", "부 담당자 이름을 입력합니다."],
+        ["사용여부", "드롭다운에서 사용 여부를 선택합니다."],
+        ["서비스구분", "드롭다운에서 서비스 구분을 선택합니다."],
+        ["전원이중화", "드롭다운에서 전원 이중화 여부를 선택합니다."],
+        ["PDU", "PDU 정보를 입력합니다."],
+        ["OS", "드롭다운에서 운영체제를 선택합니다."],
+        ["OS버전", "운영체제 버전을 입력합니다."],
+        ["제조사", "서버 제조사를 입력합니다."],
+        ["모델", "서버 모델명을 입력합니다."],
+        ["시리얼넘버", "서버 시리얼 번호를 입력합니다."],
+        ["도메인", "드롭다운에서 도메인을 선택합니다."],
+        ["현업담당자", "현업 담당자 이름을 입력합니다."],
+        ["장비크기(U)", "서버 장비 크기를 U 단위로 입력합니다."],
+        ["물리코어", "서버의 물리 코어 수를 입력합니다."],
+        ["메모리(GB)", "서버의 메모리 크기를 GB 단위로 입력합니다."],
+        ["상위자산", "VM인 경우 상위 물리 서버의 자산 번호를 입력합니다."]
+    ]
+
+    for row_idx, row_data in enumerate(guide_rows, 2):
+        for col_idx, cell_value in enumerate(row_data, 1):
+            guide_ws.cell(row=row_idx, column=col_idx, value=cell_value)
+
+    # 가이드 시트 열 너비 설정
+    guide_ws.column_dimensions['A'].width = 15
+    guide_ws.column_dimensions['B'].width = 50
+
+    # 템플릿 파일 저장
+    os.makedirs(os.path.dirname(template_path), exist_ok=True)
+    wb.save(template_path)
+
+    return send_file(template_path, as_attachment=True, download_name='자산_일괄등록_양식.xlsx')
+
+
+@asset_bp.route('/bulk_upload', methods=['POST'])
+def bulk_upload():
+    """자산 일괄 등록 처리"""
+    if 'excelFile' not in request.files:
+        return jsonify({
+            'success': False,
+            'message': '업로드된 파일이 없습니다.'
+        })
+
+    file = request.files['excelFile']
+
+    if file.filename == '':
+        return jsonify({
+            'success': False,
+            'message': '선택된 파일이 없습니다.'
+        })
+
+    if not file.filename.endswith('.xlsx'):
+        return jsonify({
+            'success': False,
+            'message': 'XLSX 형식의 파일만 업로드 가능합니다.'
+        })
+
+    # 임시 파일로 저장
+    filename = secure_filename(file.filename)
+    temp_path = os.path.join(os.getcwd(), 'uploads', filename)
+    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+    file.save(temp_path)
+
+    try:
+        # 엑셀 파일 로드
+        wb = openpyxl.load_workbook(temp_path)
+        ws = wb.active
+
+        # 헤더 확인
+        headers = [cell.value for cell in ws[1]]
+        expected_headers = [
+            '서버명*', 'IP 주소*', '호스트 이름', 'ITAM자산번호', '센터', '상면번호', '상단번호',
+            'VM여부*', '설치일자', '폐기일자', '담당자(정)', '담당자(부)', '사용여부*',
+            '서비스구분*', '전원이중화', 'PDU', 'OS*', 'OS버전', '제조사', '모델',
+            '시리얼넘버', '도메인*', '현업담당자', '장비크기(U)', '물리코어', '메모리(GB)', '상위자산'
+        ]
+
+        if headers != expected_headers:
+            return jsonify({
+                'success': False,
+                'message': '양식이 올바르지 않습니다. 제공된 템플릿을 사용해주세요.'
+            })
+
+        # 데이터 추출 및 검증
+        data = []
+        errors = []
+
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+            if all(cell is None or cell == '' for cell in row):
+                continue  # 빈 행 무시
+
+            # 필수 필드 검증
+            if not row[0]:  # 서버명
+                errors.append({'row': row_idx, 'column': '서버명*', 'message': '서버명은 필수 입력 항목입니다.'})
+
+            if not row[1]:  # IP 주소
+                errors.append({'row': row_idx, 'column': 'IP 주소*', 'message': 'IP 주소는 필수 입력 항목입니다.'})
+
+            # VM여부 검증
+            vm_value = row[7]
+            if not vm_value:
+                errors.append({'row': row_idx, 'column': 'VM여부*', 'message': 'VM여부는 필수 입력 항목입니다.'})
+            elif vm_value not in ['예', '아니오']:
+                errors.append({'row': row_idx, 'column': 'VM여부*', 'message': 'VM여부는 "예" 또는 "아니오"만 가능합니다.'})
+
+            # 사용여부 검증
+            isoper_value = row[12]
+            if not isoper_value:
+                errors.append({'row': row_idx, 'column': '사용여부*', 'message': '사용여부는 필수 입력 항목입니다.'})
+            else:
+                isoper_options = [option['state'] for option in execute_query("SELECT state FROM info_isoper")]
+                if isoper_value not in isoper_options:
+                    errors.append({'row': row_idx, 'column': '사용여부*',
+                                   'message': f'사용여부는 {", ".join(isoper_options)} 중 하나여야 합니다.'})
+
+            # 서비스구분 검증
+            oper_value = row[13]
+            if not oper_value:
+                errors.append({'row': row_idx, 'column': '서비스구분*', 'message': '서비스구분은 필수 입력 항목입니다.'})
+            else:
+                oper_options = [option['state'] for option in execute_query("SELECT state FROM info_oper")]
+                if oper_value not in oper_options:
+                    errors.append({'row': row_idx, 'column': '서비스구분*',
+                                   'message': f'서비스구분은 {", ".join(oper_options)} 중 하나여야 합니다.'})
+
+            # OS 검증
+            os_value = row[16]
+            if not os_value:
+                errors.append({'row': row_idx, 'column': 'OS*', 'message': 'OS는 필수 입력 항목입니다.'})
+            else:
+                os_options = [option['state'] for option in execute_query("SELECT state FROM info_os")]
+                if os_value not in os_options:
+                    errors.append(
+                        {'row': row_idx, 'column': 'OS*', 'message': f'OS는 {", ".join(os_options)} 중 하나여야 합니다.'})
+
+            # 도메인 검증
+            domain_value = row[21]
+            if not domain_value:
+                errors.append({'row': row_idx, 'column': '도메인*', 'message': '도메인은 필수 입력 항목입니다.'})
+            else:
+                domain_options = [option['state'] for option in execute_query("SELECT state FROM info_domain")]
+                if domain_value not in domain_options:
+                    errors.append(
+                        {'row': row_idx, 'column': '도메인*', 'message': f'도메인은 {", ".join(domain_options)} 중 하나여야 합니다.'})
+
+            # 전원이중화 검증 (필수는 아님)
+            power_value = row[14]
+            if power_value:
+                power_options = [option['state'] for option in execute_query("SELECT state FROM info_power")]
+                if power_value not in power_options:
+                    errors.append({'row': row_idx, 'column': '전원이중화',
+                                   'message': f'전원이중화는 {", ".join(power_options)} 중 하나여야 합니다.'})
+
+            # 날짜 형식 검증
+            datein = row[8]
+            if datein:
+                try:
+                    if isinstance(datein, str):
+                        datetime.strptime(datein, '%Y-%m-%d')
+                    # 엑셀 날짜 형식인 경우는 이미 datetime 객체로 로드됨
+                except ValueError:
+                    errors.append({'row': row_idx, 'column': '설치일자', 'message': '설치일자는 YYYY-MM-DD 형식이어야 합니다.'})
+
+            dateout = row[9]
+            if dateout:
+                try:
+                    if isinstance(dateout, str):
+                        datetime.strptime(dateout, '%Y-%m-%d')
+                except ValueError:
+                    errors.append({'row': row_idx, 'column': '폐기일자', 'message': '폐기일자는 YYYY-MM-DD 형식이어야 합니다.'})
+
+            # 상위자산 검증 (VM이 '예'인 경우에만)
+            if vm_value == '예':
+                vcenter = row[26]  # 상위자산
+                if vcenter:
+                    # 상위자산이 존재하는지 확인
+                    sql = "SELECT COUNT(*) as count FROM total_asset WHERE pnum = %s AND isvm = 0"
+                    result = execute_query(sql, (vcenter,), fetch_all=False)
+                    if result['count'] == 0:
+                        errors.append(
+                            {'row': row_idx, 'column': '상위자산', 'message': f'상위자산 번호 {vcenter}에 해당하는 물리 서버가 존재하지 않습니다.'})
+
+            # 데이터 추가
+            data.append({
+                'servername': row[0],
+                'ip': row[1],
+                'hostname': row[2],
+                'itamnum': row[3],
+                'center': row[4],
+                'loc1': row[5],
+                'loc2': row[6],
+                'isvm': 1 if row[7] == '예' else 0,
+                'datein': row[8],
+                'dateout': row[9],
+                'charge': row[10],
+                'charge2': row[11],
+                'isoper': row[12],
+                'oper': row[13],
+                'power': row[14],
+                'pdu': row[15],
+                'os': row[16],
+                'osver': row[17],
+                'maker': row[18],
+                'model': row[19],
+                'serial': row[20],
+                'domain': row[21],
+                'charge3': row[22],
+                'usize': row[23],
+                'cpucore': row[24],
+                'memory': row[25],
+                'vcenter': row[26] if row[7] == '예' else None
+            })
+
+        # 오류가 있으면 처리 중단
+        if errors:
+            return jsonify({
+                'success': False,
+                'message': f'{len(errors)}개의 오류가 발견되었습니다. 수정 후 다시 시도해주세요.',
+                'errors': errors
+            })
+
+        # 데이터 DB에 저장
+        inserted_count = 0
+        db = get_db_connection()
+        try:
+            with db.cursor() as cursor:
+                for item in data:
+                    # 코드값 조회
+                    # isoper
+                    cursor.execute("SELECT isoper FROM info_isoper WHERE state = %s", (item['isoper'],))
+                    isoper_value = cursor.fetchone()
+                    isoper = isoper_value['isoper'] if isoper_value else 0
+
+                    # oper
+                    cursor.execute("SELECT oper FROM info_oper WHERE state = %s", (item['oper'],))
+                    oper_value = cursor.fetchone()
+                    oper = oper_value['oper'] if oper_value else 0
+
+                    # power
+                    power = None
+                    if item['power']:
+                        cursor.execute("SELECT power FROM info_power WHERE state = %s", (item['power'],))
+                        power_value = cursor.fetchone()
+                        power = power_value['power'] if power_value else None
+
+                    # os
+                    cursor.execute("SELECT os FROM info_os WHERE state = %s", (item['os'],))
+                    os_value = cursor.fetchone()
+                    os_code = os_value['os'] if os_value else 0
+
+                    # domain
+                    cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (item['domain'],))
+                    domain_value = cursor.fetchone()
+                    domain = domain_value['domain'] if domain_value else 0
+
+                    # 날짜 처리
+                    datein = item['datein']
+                    if isinstance(datein, str) and datein:
+                        datein = datetime.strptime(datein, '%Y-%m-%d').date()
+                    elif isinstance(datein, datetime):
+                        datein = datein.date()
+
+                    dateout = item['dateout']
+                    if isinstance(dateout, str) and dateout:
+                        dateout = datetime.strptime(dateout, '%Y-%m-%d').date()
+                    elif isinstance(dateout, datetime):
+                        dateout = dateout.date()
+
+                    # 숫자 필드 처리
+                    loc2 = int(item['loc2']) if item['loc2'] else None
+                    usize = int(item['usize']) if item['usize'] else 1
+                    cpucore = int(item['cpucore']) if item['cpucore'] else None
+                    memory = int(item['memory']) if item['memory'] else None
+                    vcenter = int(item['vcenter']) if item['vcenter'] else None
+
+                    # 현재 시간
+                    now = datetime.now()
+
+                    # SQL 쿼리
+                    sql = """INSERT INTO total_asset (
+                        itamnum, servername, ip, hostname, center, loc1, loc2, isvm, vcenter, 
+                        datein, dateout, charge, charge2, isoper, oper, power, pdu, os, osver, 
+                        maker, model, serial, domain, charge3, usize, cpucore, memory, 
+                        isfix, dateinsert, dateupdate
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )"""
+
+                    cursor.execute(sql, (
+                        item['itamnum'], item['servername'], item['ip'], item['hostname'],
+                        item['center'], item['loc1'], loc2, item['isvm'], vcenter,
+                        datein, dateout, item['charge'], item['charge2'],
+                        isoper, oper, power, item['pdu'], os_code, item['osver'],
+                        item['maker'], item['model'], item['serial'], domain, item['charge3'],
+                        usize, cpucore, memory, 1, now, now
+                    ))
+
+                    inserted_count += 1
+
+                db.commit()
+        except Exception as e:
+            db.rollback()
+            return jsonify({
+                'success': False,
+                'message': f'데이터 저장 중 오류가 발생했습니다: {str(e)}'
+            })
+        finally:
+            db.close()
+
+        # 캐시 무효화
+        invalidate_cache_pattern('index_data')
+        invalidate_cache_pattern('asset_data')
+        invalidate_cache_pattern('asset_graph')
+
+        return jsonify({
+            'success': True,
+            'message': f'{inserted_count}개의 자산이 성공적으로 등록되었습니다.',
+            'details': {
+                '총 등록 자산': inserted_count,
+                '물리 서버': sum(1 for item in data if item['isvm'] == 0),
+                '가상 서버': sum(1 for item in data if item['isvm'] == 1)
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'파일 처리 중 오류가 발생했습니다: {str(e)}'
+        })
+    finally:
+        # 임시 파일 삭제
+        if os.path.exists(temp_path):
+            os.remove(temp_path)

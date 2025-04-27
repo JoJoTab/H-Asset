@@ -217,6 +217,7 @@
         </div>
         <div class="text-right">
             <button type="submit" class="btn btn-primary">저장</button>
+            <button type="button" class="btn btn-success" data-toggle="modal" data-target="#bulkUploadModal">일괄등록</button>
             <a href="{{ url_for('asset.index') }}" class="btn btn-secondary">취소</a>
         </div>
     </form>
@@ -256,6 +257,80 @@
                             <!-- 검색 결과가 여기에 표시됩니다 -->
                         </tbody>
                     </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 일괄 등록 모달 -->
+<div class="modal fade" id="bulkUploadModal" tabindex="-1" role="dialog" aria-labelledby="bulkUploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkUploadModalLabel">자산 일괄 등록</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-4">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h6 class="mb-0">양식 다운로드</h6>
+                            </div>
+                            <div class="card-body">
+                                <p>자산 일괄 등록을 위한 엑셀 양식을 다운로드하세요.</p>
+                                <a href="{{ url_for('asset.download_template') }}" class="btn btn-outline-primary">
+                                    <i class="fas fa-file-excel"></i> 엑셀 양식 다운로드
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header bg-success text-white">
+                                <h6 class="mb-0">파일 업로드</h6>
+                            </div>
+                            <div class="card-body">
+                                <form id="bulkUploadForm" action="{{ url_for('asset.bulk_upload') }}" method="POST" enctype="multipart/form-data">
+                                    <div class="form-group">
+                                        <label for="excelFile">작성된 엑셀 파일 선택:</label>
+                                        <div class="custom-file">
+                                            <input type="file" class="custom-file-input" id="excelFile" name="excelFile" accept=".xlsx" required>
+                                            <label class="custom-file-label" for="excelFile">파일 선택...</label>
+                                        </div>
+                                        <small class="form-text text-muted">
+                                            제공된 양식에 맞게 작성된 엑셀 파일(.xlsx)만 업로드 가능합니다.
+                                        </small>
+                                    </div>
+                                    <div class="text-right">
+                                        <button type="submit" class="btn btn-success">
+                                            <i class="fas fa-upload"></i> 업로드 및 등록
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-4" id="uploadResultContainer" style="display: none;">
+                    <div class="col-md-12">
+                        <div class="card">
+                            <div class="card-header bg-info text-white">
+                                <h6 class="mb-0">업로드 결과</h6>
+                            </div>
+                            <div class="card-body" id="uploadResultContent">
+                                <!-- 업로드 결과가 여기에 표시됩니다 -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -369,6 +444,83 @@
 
             // 모달 닫기
             $('#parentAssetModal').modal('hide');
+        });
+
+        // 파일 선택 시 파일명 표시
+        $('.custom-file-input').on('change', function() {
+            var fileName = $(this).val().split('\\').pop();
+            $(this).next('.custom-file-label').html(fileName);
+        });
+
+        // 일괄 업로드 폼 제출
+        $('#bulkUploadForm').on('submit', function(e) {
+            e.preventDefault();
+
+            var formData = new FormData(this);
+
+            $.ajax({
+                url: $(this).attr('action'),
+                type: 'POST',
+                data: formData,
+                contentType: false,
+                processData: false,
+                beforeSend: function() {
+                    $('#uploadResultContainer').hide();
+                    $('#uploadResultContent').html('<div class="text-center"><div class="spinner-border" role="status"><span class="sr-only">처리 중...</span></div><p class="mt-2">파일을 처리 중입니다. 잠시만 기다려주세요...</p></div>');
+                    $('#uploadResultContainer').show();
+                },
+                success: function(response) {
+                    $('#uploadResultContent').html('');
+
+                    if (response.success) {
+                        var resultHtml = '<div class="alert alert-success">' +
+                                         '<h5><i class="fas fa-check-circle"></i> 업로드 성공</h5>' +
+                                         '<p>' + response.message + '</p>' +
+                                         '</div>';
+
+                        if (response.details) {
+                            resultHtml += '<div class="table-responsive mt-3">' +
+                                          '<table class="table table-sm table-bordered">' +
+                                          '<thead><tr><th>항목</th><th>개수</th></tr></thead>' +
+                                          '<tbody>';
+
+                            for (var key in response.details) {
+                                resultHtml += '<tr><td>' + key + '</td><td>' + response.details[key] + '</td></tr>';
+                            }
+
+                            resultHtml += '</tbody></table></div>';
+                        }
+
+                        $('#uploadResultContent').html(resultHtml);
+                    } else {
+                        var errorHtml = '<div class="alert alert-danger">' +
+                                        '<h5><i class="fas fa-exclamation-triangle"></i> 업로드 실패</h5>' +
+                                        '<p>' + response.message + '</p>' +
+                                        '</div>';
+
+                        if (response.errors && response.errors.length > 0) {
+                            errorHtml += '<div class="table-responsive mt-3">' +
+                                         '<table class="table table-sm table-bordered table-striped">' +
+                                         '<thead><tr><th>행</th><th>열</th><th>오류 내용</th></tr></thead>' +
+                                         '<tbody>';
+
+                            response.errors.forEach(function(error) {
+                                errorHtml += '<tr><td>' + error.row + '</td><td>' + error.column + '</td><td>' + error.message + '</td></tr>';
+                            });
+
+                            errorHtml += '</tbody></table></div>';
+                        }
+
+                        $('#uploadResultContent').html(errorHtml);
+                    }
+
+                    $('#uploadResultContainer').show();
+                },
+                error: function() {
+                    $('#uploadResultContent').html('<div class="alert alert-danger"><h5><i class="fas fa-exclamation-circle"></i> 오류 발생</h5><p>파일 업로드 중 오류가 발생했습니다. 다시 시도해주세요.</p></div>');
+                    $('#uploadResultContainer').show();
+                }
+            });
         });
     });
 </script>

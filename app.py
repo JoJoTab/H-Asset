@@ -137,7 +137,7 @@ def storage():
             cursor.execute(sql)
             result = cursor.fetchall()
 
-            # 가장 최근 날짜 가져오기
+            # ���장 최근 날짜 가져오기
             sql_recent_date = """SELECT MAX(DATEIN) AS end_date FROM total_storage"""
             sql_yesterday_date = """SELECT DATE_SUB(MAX(DATEIN), INTERVAL 1 DAY) AS start_date FROM total_storage"""
             cursor.execute(sql_recent_date)
@@ -623,7 +623,7 @@ def rack_export():
                 if j == 0: continue
                 cell = sheet.cell(row=start_row + loc2, column=start_col + j)
 
-                # 기존 값이 있을 경우 개행하여 추가
+                # 기존 ��이 있을 경우 개행하여 추가
                 if cell.value:
                     # cell.value가 int인 경우 문자열로 변환
                     if isinstance(cell.value, int):

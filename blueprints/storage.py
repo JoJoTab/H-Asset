@@ -1,10 +1,11 @@
 from flask import Blueprint, render_template, redirect, url_for, request, send_file, jsonify, flash
 import pandas as pd
 import numpy as np
+from datetime import datetime
 import plotly.express as px
 from utils.db import execute_query, get_db_connection
-from datetime import datetime
-from utils.cache import cache
+import os
+import tempfile
 
 storage_bp = Blueprint('storage', __name__)
 
@@ -18,13 +19,14 @@ def storage():
     end_date = None
     start_date = None
     error_message = None
-    graph_html_tl = ""
-    graph_html_use = ""
+    graph_html_tl = None
+    graph_html_use = None
 
     try:
         with connection.cursor() as cursor:
             # 전체 데이터 조회
             sql = "SELECT DATEIN, STORAGE, PID, AV_CAP, TP_CAP, TL_CAP FROM total_storage"
+
             cursor.execute(sql)
             result = cursor.fetchall()
 
@@ -46,6 +48,18 @@ def storage():
                         FROM total_storage 
                         WHERE DATEIN BETWEEN %s AND %s
                         """
+
+            cursor.execute(sql_data, (start_date, end_date))
+            date_range_data = cursor.fetchall()
+
+            # 데이터 조회 후 추가
+            # SQL 쿼리로 데이터 조회
+            sql_data = """
+                        SELECT STORAGE, PID, DATEIN, AV_CAP, TP_CAP, TL_CAP 
+                        FROM total_storage 
+                        WHERE DATEIN BETWEEN %s AND %s
+                        """
+
             cursor.execute(sql_data, (start_date, end_date))
             date_range_data = cursor.fetchall()
 
@@ -88,17 +102,18 @@ def storage():
             # DataFrame 생성
             df = pd.DataFrame(final_data_for_plot)
 
-            # 할당률 꺾은선 그래프 생성
-            fig_tl = px.line(df, x='dates', y='tl_rates', color='storages',
-                             labels={'tl_rates': '할당률 (%)', 'dates': '날짜'})
+            if not df.empty:
+                # 할당률 꺾은선 그래프 생성
+                fig_tl = px.line(df, x='dates', y='tl_rates', color='storages',
+                                 labels={'tl_rates': '할당률 (%)', 'dates': '날짜'})
 
-            # 사용률 꺾은선 그래프 생성
-            fig_use = px.line(df, x='dates', y='use_rates', color='storages',
-                              labels={'use_rates': '사용률 (%)', 'dates': '날짜'})
+                # 사용률 꺾은선 그래프 생성
+                fig_use = px.line(df, x='dates', y='use_rates', color='storages',
+                                  labels={'use_rates': '사용률 (%)', 'dates': '날짜'})
 
-            # 그래프 HTML 코드로 변환
-            graph_html_tl = fig_tl.to_html(full_html=False)
-            graph_html_use = fig_use.to_html(full_html=False)
+                # 그래프 HTML 코드로 변환
+                graph_html_tl = fig_tl.to_html(full_html=False)
+                graph_html_use = fig_use.to_html(full_html=False)
 
             if not date_range_data:
                 # 시작 날짜와 종료 날짜의 데이터 유무 검사
@@ -158,7 +173,7 @@ def storage():
 
 @storage_bp.route('/storage_upload', methods=['POST'])
 def storage_upload():
-    """스토리지 데이터 업로드 처리"""
+    """스토리지 데이터 업로드"""
     if 'file' not in request.files:
         return 'No file part', 400
 
@@ -170,30 +185,91 @@ def storage_upload():
     date = content[0].strip()  # 첫 번째 줄에서 날짜 추출
     storage_type = None
 
-    connection = get_db_connection()
-    try:
-        with connection.cursor() as cursor:
-            for line in content[1:]:
-                line = line.strip()
-                if line.startswith("VSP") or line.startswith("F800") or line.startswith("DR_"):  # 스토리지 종류 확인
-                    storage_type = line  # 스토리지 종류 저장
-                elif line.startswith("PID"):
-                    continue  # 헤더는 무시
-                elif line and storage_type:  # 데이터 줄 처리
-                    data = line.split()
-                    if len(data) > 10:  # 유효한 데이터인지 확인
-                        pid = data[0]
-                        av_cap = data[3]
-                        tp_cap = data[4]
-                        tl_cap = data[10]
-
-                        # 데이터 삽입
-                        sql = "INSERT INTO total_storage (DATEIN, STORAGE, PID, AV_CAP, TP_CAP, TL_CAP) VALUES (%s, %s, %s, %s, %s, %s)"
-                        cursor.execute(sql, (date, storage_type, pid, av_cap, tp_cap, tl_cap))
-
-            connection.commit()
-    finally:
-        connection.close()
+    for line in content[1:]:
+        line = line.strip()
+        if line.startswith("VSP") or line.startswith("F800") or line.startswith("DR_"):  # 스토리지 종류 확인
+            storage_type = line  # 스토리지 종류 저장
+        elif line.startswith("PID"):
+            continue  # 헤더는 무시
+        elif line and storage_type:  # 데이터 줄 처리
+            data = line.split()
+            if len(data) > 10:  # 유효한 데이터인지 확인
+                pid = data[0]
+                av_cap = data[3]
+                tp_cap = data[4]
+                tl_cap = data[10]
+                insert_data(date, storage_type, pid, av_cap, tp_cap, tl_cap)
 
     # 성공적으로 처리된 후 적절한 응답을 반환
     return redirect(url_for('storage.storage'))
+
+
+@storage_bp.route('/storage_export', methods=['POST'])
+def storage_export():
+    """스토리지 데이터 엑셀 내보내기"""
+    start_date = request.form.get('start_date')
+    end_date = request.form.get('end_date')
+
+    if not start_date or not end_date:
+        flash('시작 날짜와 종료 날짜를 모두 선택해주세요.', 'error')
+        return redirect(url_for('storage.storage'))
+
+    # 데이터베이스에서 데이터 가져오기
+    sql = """
+    SELECT DATEIN, STORAGE, PID, AV_CAP, TP_CAP, TL_CAP,
+           (TL_CAP * 100 / TP_CAP) AS TL_RATE,
+           ((TP_CAP - AV_CAP) * 100 / TL_CAP) AS USE_RATE
+    FROM total_storage
+    WHERE DATEIN BETWEEN %s AND %s
+    ORDER BY DATEIN, STORAGE, PID
+    """
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, (start_date, end_date))
+            data = cursor.fetchall()
+    finally:
+        connection.close()
+
+    if not data:
+        flash('선택한 기간에 데이터가 없습니다.', 'error')
+        return redirect(url_for('storage.storage'))
+
+    # 데이터프레임 생성
+    df = pd.DataFrame(data)
+
+    # MB를 TB로 변환
+    df['AV_CAP'] = df['AV_CAP'] / 1024 / 1024  # TB 단위로 변환
+    df['TP_CAP'] = df['TP_CAP'] / 1024 / 1024
+    df['TL_CAP'] = df['TL_CAP'] / 1024 / 1024
+
+    # 컬럼명 변경
+    df.rename(columns={
+        'DATEIN': '날짜',
+        'STORAGE': '스토리지',
+        'PID': '풀ID',
+        'AV_CAP': '가용량(TB)',
+        'TP_CAP': '총용량(TB)',
+        'TL_CAP': '할당량(TB)',
+        'TL_RATE': '할당률(%)',
+        'USE_RATE': '사용률(%)'
+    }, inplace=True)
+
+    # 임시 파일 생성
+    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+        temp_filename = tmp.name
+
+    # 엑셀 파일로 저장
+    df.to_excel(temp_filename, index=False, sheet_name='스토리지 용량 정보')
+
+    # 파일 이름 설정
+    export_filename = f'storage_capacity_{start_date}_to_{end_date}.xlsx'
+
+    # 파일 전송
+    return send_file(
+        temp_filename,
+        as_attachment=True,
+        download_name=export_filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )

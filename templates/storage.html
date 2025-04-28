@@ -1,104 +1,137 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="row">
-    <div class="col-md-6">
-        <h2>스토리지 관리</h2>
-    </div>
-    <div class="col-md-6 text-right">
-        <div>
-            <h5>업데이트 날짜: {{ latest_date }}</h5>
-            <button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#storage_upload">수동등록</button>
+<div class="container mt-4">
+    <h2>스토리지 관리</h2>
+
+    <!-- 날짜 선택 폼 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5>기간 선택</h5>
         </div>
-    </div>
-</div>
-<hr width="100%" class="divider"/>
-<div>
-    <div class="row">
-        <div class="col-md-6" style="min-width: 950px; min-height: 400px;">
-            <div class="my-3">
-                <div>
-                    <!-- 날짜 입력 폼 -->
-                    <form method="POST" action="/storage">
+        <div class="card-body">
+            <form method="post" class="date-form">
+                <div class="row">
+                    <div class="col-md-4">
                         <div class="form-group">
                             <label for="start_date">시작 날짜:</label>
                             <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}">
                         </div>
+                    </div>
+                    <div class="col-md-4">
                         <div class="form-group">
                             <label for="end_date">종료 날짜:</label>
                             <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
                         </div>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
                         <button type="submit" class="btn btn-primary">조회</button>
-                    </form>
-                    <div>
-                        {% for storage, pools in data1.items() %}
-                        <hr>
-                        <div class="p-1 mb-3">
-                            <h4>{{ storage }}</h4>
-                            <table class="storage_display" style="width:100%">
-                                <thead>
-                                    <tr>
-                                        <th>Pool</th>
-                                        <th>전체용량 (TB)</th>
-                                        <th>할당량 (TB)</th>
-                                        <th>가용량 (TB)</th>
-                                        <th>할당률 (%)</th>
-                                        <th>사용률 (%)</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for pid, info in pools.items() %}
-                                    <tr>
-                                        <td>{{ pid }}</td>
-                                        <td>{{ info.TP_CAP | round(2) }} {{ info.TP_CAP_diff if info.TP_CAP_diff is not none else '' }}</td>
-                                        <td>{{ info.TL_CAP | round(2) }} {{ info.TL_CAP_diff if info.TL_CAP_diff is not none else '' }}</td>
-                                        <td>{{ info.AV_CAP | round(2) }} {{ info.AV_CAP_diff if info.AV_CAP_diff is not none else '' }}</td>
-                                        <td>{{ info.TL_RATE | round(2) }}</td>
-                                        <td>{{ info.USE_RATE | round(2) }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% endfor %}
                     </div>
                 </div>
+            </form>
+
+            <!-- 엑셀 내보내기 폼 -->
+            <form method="post" action="{{ url_for('storage.storage_export') }}" class="export-form">
+                <input type="hidden" name="start_date" value  }}" class="export-form">
+                <input type="hidden" name="start_date" value="{{ start_date }}">
+                <input type="hidden" name="end_date" value="{{ end_date }}">
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-file-excel"></i> 엑셀로 내보내기
+                </button>
+            </form>
+        </div>
+    </div>
+
+    {% if error_message %}
+    <div class="alert alert-danger">
+        {{ error_message }}
+    </div>
+    {% endif %}
+
+    <!-- 그래프 표시 -->
+    {% if graph_html_tl and graph_html_use %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5>스토리지 사용 추이</h5>
+        </div>
+        <div class="card-body">
+            <div class="graph-container">
+                <h6>할당률 추이</h6>
+                {{ graph_html_tl|safe }}
+            </div>
+            <div class="graph-container">
+                <h6>사용률 추이</h6>
+                {{ graph_html_use|safe }}
             </div>
         </div>
-        <div class="col-md-6" style="min-width: 950px; min-height: 400px;">
-            <div class="my-3">
-                <div>
-                    <h4>할당률</h4>
-                    {{ graph_html_tl | safe }}
-                </div>
-                <div>
-                    <h4>사용률</h4>
-                    {{ graph_html_use | safe }}
-                </div>
+    </div>
+    {% endif %}
+
+    <!-- 스토리지 데이터 표시 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5>스토리지 현황 ({{ latest_date }})</h5>
+        </div>
+        <div class="card-body">
+            {% for storage, pids in data1.items() %}
+            <h5>{{ storage }}</h5>
+            <div class="table-container">
+                <table class="table table-striped table-bordered">
+                    <thead>
+                        <tr>
+                            <th>PID</th>
+                            <th>가용량(TB)</th>
+                            <th>총용량(TB)</th>
+                            <th>할당량(TB)</th>
+                            <th>할당률(%)</th>
+                            <th>사용률(%)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for pid, data in pids.items() %}
+                        <tr>
+                            <td>{{ pid }}</td>
+                            <td>{{ data.AV_CAP|round(2) }} {% if data.AV_CAP_diff %}<span class="text-muted">{{ data.AV_CAP_diff }}</span>{% endif %}</td>
+                            <td>{{ data.TP_CAP|round(2) }} {% if data.TP_CAP_diff %}<span class="text-muted">{{ data.TP_CAP_diff }}</span>{% endif %}</td>
+                            <td>{{ data.TL_CAP|round(2) }} {% if data.TL_CAP_diff %}<span class="text-muted">{{ data.TL_CAP_diff }}</span>{% endif %}</td>
+                            <td>{{ data.TL_RATE|round(2) }}%</td>
+                            <td>{{ data.USE_RATE|round(2) }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-            <hr/>
-            <div>
-                <h4>용량검색</h4>
-                <table id="storage_table" class="display" style="width:100%">
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- 전체 데이터 표시 -->
+    <div class="card">
+        <div class="card-header">
+            <h5>전체 스토리지 데이터</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-container">
+                <table id="storageTable" class="table table-striped table-bordered">
                     <thead>
                         <tr>
                             <th>날짜</th>
                             <th>스토리지</th>
-                            <th>Pool</th>
+                            <th>PID</th>
                             <th>가용량(TB)</th>
-                            <th>전체용량(TB)</th>
+                            <th>총용량(TB)</th>
                             <th>할당량(TB)</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for asset in data2 %}
+                        {% for row in data2 %}
                         <tr>
-                            <td>{{ asset.DATEIN }}</td>
-                            <td>{{ asset.STORAGE }}</td>
-                            <td>{{ asset.PID }}</td>
-                            <td>{{ asset.AV_CAP }}</td>
-                            <td>{{ asset.TP_CAP }}</td>
-                            <td>{{ asset.TL_CAP }}</td>
+                            <td>{{ row.DATEIN }}</td>
+                            <td>{{ row.STORAGE }}</td>
+                            <td>{{ row.PID }}</td>
+                            <td>{{ row.AV_CAP|round(2) }}</td>
+                            <td>{{ row.TP_CAP|round(2) }}</td>
+                            <td>{{ row.TL_CAP|round(2) }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -107,44 +140,31 @@
         </div>
     </div>
 </div>
-<!-- 오류 메시지 표시 -->
-{% if error_message %}
-<div class="alert alert-danger" role="alert">
-    {{ error_message }}
-</div>
-{% endif %}
-<!-- 수동 업로드 모달 -->
-<div class="modal fade" id="storage_upload" tabindex="-1" role="dialog" aria-labelledby="uploadModal" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <form action="/storage_upload" method="POST" enctype="multipart/form-data">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="uploadModalLabel">파일 업로드</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <input type="file" name="file" accept=".txt" required>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
-                    <button type="submit" class="btn btn-primary">업로드</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
+<style>
+    .table-container {
+        margin-top: 20px;
+    }
+    .graph-container {
+        margin-top: 30px;
+        margin-bottom: 30px;
+    }
+    .date-form {
+        margin-bottom: 20px;
+    }
+    .export-form {
+        margin-top: 10px;
+        margin-bottom: 20px;
+    }
+</style>
 <script>
     $(document).ready(function() {
-        $('.storage_display').DataTable({
-            paging: false,
-            searching: false,
-            info: false
+        $('#storageTable').DataTable({
+            "order": [[ 0, "desc" ]],
+            "pageLength": 25,
+            "language": {
+                "url": "{{ url_for('static', filename='js/korean.json') }}"
+            }
         });
-    });
-    $(document).ready(function() {
-        $('#storage_table').DataTable();
     });
 </script>
 {% endblock %}

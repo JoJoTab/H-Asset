@@ -11,6 +11,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment, Protection
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
+from utils.auto_register import handle_auto_registered_assets
 
 asset_bp = Blueprint('asset', __name__)
 
@@ -24,7 +25,7 @@ def index():
     # 그래프 데이터 가져오기
     graphs = generate_asset_graph()
 
-    # 자산 데이터 가져오기
+    # 자산 데이터 가져오기 (isfix=1 또는 isfix=2)
     sql = """
         SELECT ta.*, 
                id.state AS domain_state, 
@@ -38,8 +39,8 @@ def index():
         LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
         LEFT JOIN info_power io_power ON ta.power = io_power.power
         LEFT JOIN info_os io_os ON ta.os = io_os.os
-        WHERE ta.isfix = 1
-        ORDER BY ta.dateupdate DESC
+        WHERE ta.isfix IN (1, 2)
+        ORDER BY ta.isfix DESC, ta.dateupdate DESC
     """
     data = execute_query(sql)
 
@@ -60,6 +61,27 @@ def update_isfix():
             flash(f'{len(selected_assets)}개 자산의 정합성 확인이 완료되었습니다.', 'success')
         else:
             flash('선택된 자산이 없습니다.', 'warning')
+
+    return redirect(url_for('asset.index'))
+
+
+@asset_bp.route('/handle_auto_assets', methods=['POST'])
+def handle_auto_assets():
+    """자동 등록된 자산 처리"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        selected_assets = request.form.getlist('selected_assets[]')
+
+        if not action or not selected_assets:
+            flash('선택된 자산이 없거나 작업이 지정되지 않았습니다.', 'warning')
+            return redirect(url_for('asset.index'))
+
+        success, message = handle_auto_registered_assets(action, selected_assets)
+
+        if success:
+            flash(message, 'success')
+        else:
+            flash(message, 'warning')
 
     return redirect(url_for('asset.index'))
 

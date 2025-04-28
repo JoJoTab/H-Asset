@@ -23,6 +23,8 @@ from blueprints.rack import rack_bp
 from blueprints.file import file_bp
 from blueprints.trend import trend_bp
 from utils.db import init_db_pool, close_db_pool
+from utils.auto_register import setup_auto_register
+from utils.auto_storage import setup_auto_storage
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -33,6 +35,10 @@ app.register_blueprint(storage_bp)
 app.register_blueprint(rack_bp)
 app.register_blueprint(file_bp)
 app.register_blueprint(trend_bp)
+
+# 자동 등록 기능 설정
+setup_auto_register()
+setup_auto_storage()
 
 # 비동기 함수 호출 제거
 @app.before_first_request
@@ -137,7 +143,7 @@ def storage():
             cursor.execute(sql)
             result = cursor.fetchall()
 
-            # ���장 최근 날짜 가져오기
+            # 장 최근 날짜 가져오기
             sql_recent_date = """SELECT MAX(DATEIN) AS end_date FROM total_storage"""
             sql_yesterday_date = """SELECT DATE_SUB(MAX(DATEIN), INTERVAL 1 DAY) AS start_date FROM total_storage"""
             cursor.execute(sql_recent_date)
@@ -623,7 +629,7 @@ def rack_export():
                 if j == 0: continue
                 cell = sheet.cell(row=start_row + loc2, column=start_col + j)
 
-                # 기존 ��이 있을 경우 개행하여 추가
+                # 기존 값이 있을 경우 개행하여 추가
                 if cell.value:
                     # cell.value가 int인 경우 문자열로 변환
                     if isinstance(cell.value, int):

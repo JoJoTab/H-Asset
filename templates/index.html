@@ -1,6 +1,15 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<style>
+    /* 자동 등록된 자산 강조 */
+    tr.auto-registered {
+        background-color: #fff3cd;
+    }
+    tr.auto-registered:hover {
+        background-color: #ffe8b3;
+    }
+</style>
 <h1>자산 관리</h1>
 <hr width="100%" class="divider"/>
 
@@ -202,6 +211,8 @@
                     <button type="button" id="selectAllBtn" class="btn btn-sm btn-light mr-2">전체 선택</button>
                     <button type="button" id="deselectAllBtn" class="btn btn-sm btn-light mr-2">전체 해제</button>
                     <button type="submit" form="updateIsFixForm" class="btn btn-sm btn-success">확인 완료</button>
+                    <button type="button" id="applyAutoBtn" class="btn btn-sm btn-primary ml-2">반영</button>
+                    <button type="button" id="deleteAutoBtn" class="btn btn-sm btn-danger ml-2">삭제</button>
                 </div>
             </div>
             <div class="card-body">
@@ -230,7 +241,7 @@
                             </thead>
                             <tbody>
                                 {% for asset in data %}
-                                <tr>
+                                <tr class="{% if asset.isfix == 2 %}auto-registered{% endif %}">
                                     <td>
                                         <div class="custom-control custom-checkbox">
                                             <input type="checkbox" class="custom-control-input asset-checkbox" id="asset{{ asset.pnum }}" name="selected_assets[]" value="{{ asset.pnum }}">
@@ -261,6 +272,10 @@
         </div>
     </div>
 </div>
+<form id="handleAutoForm" action="{{ url_for('asset.handle_auto_assets') }}" method="POST" style="display: none;">
+    <input type="hidden" name="action" id="autoAction" value="">
+    <!-- 선택된 자산들은 JavaScript로 추가됨 -->
+</form>
 
 <script>
     // Plotly.js가 로드되었는지 확인
@@ -315,6 +330,63 @@
 
             return confirm(selectedCount + '개의 자산을 확인 완료 처리하시겠습니까?');
         });
+    });
+
+    // 자동 등록 자산 처리 버튼
+    $('#applyAutoBtn').on('click', function() {
+        var selectedCount = $('.asset-checkbox:checked').length;
+        if (selectedCount === 0) {
+            alert('처리할 자산을 선택해주세요.');
+            return;
+        }
+
+        if (confirm(selectedCount + '개의 자산을 반영하시겠습니까?\n(동일한 IP/호스트명을 가진 기존 자산은 폐기 처리됩니다)')) {
+            // 폼 설정
+            $('#autoAction').val('apply');
+
+            // 선택된 자산 추가
+            $('#handleAutoForm').empty().append($('#autoAction'));
+            $('.asset-checkbox:checked').each(function() {
+                $('#handleAutoForm').append(
+                    $('<input>').attr({
+                        type: 'hidden',
+                        name: 'selected_assets[]',
+                        value: $(this).val()
+                    })
+                );
+            });
+
+            // 폼 제출
+            $('#handleAutoForm').submit();
+        }
+    });
+
+    $('#deleteAutoBtn').on('click', function() {
+        var selectedCount = $('.asset-checkbox:checked').length;
+        if (selectedCount === 0) {
+            alert('삭제할 자산을 선택해주세요.');
+            return;
+        }
+
+        if (confirm(selectedCount + '개의 자산을 삭제하시겠습니까?')) {
+            // 폼 설정
+            $('#autoAction').val('delete');
+
+            // 선택된 자산 추가
+            $('#handleAutoForm').empty().append($('#autoAction'));
+            $('.asset-checkbox:checked').each(function() {
+                $('#handleAutoForm').append(
+                    $('<input>').attr({
+                        type: 'hidden',
+                        name: 'selected_assets[]',
+                        value: $(this).val()
+                    })
+                );
+            });
+
+            // 폼 제출
+            $('#handleAutoForm').submit();
+        }
     });
 </script>
 {% endblock %}

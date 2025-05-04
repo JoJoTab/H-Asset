@@ -1,21 +1,20 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
 
 {% block content %}
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3">서비스 관리</h1>
-        <a href="{{ url_for('service.add_service') }}" class="btn btn-primary">
-            <i class="fas fa-plus"></i> 서비스 추가
-        </a>
-    </div>
+    <h1 class="h3 mb-2 text-gray-800">서비스 관리</h1>
+    <p class="mb-4">서비스 목록을 관리하고 자산과 연계할 수 있습니다.</p>
 
     <div class="card shadow mb-4">
-        <div class="card-header py-3">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
             <h6 class="m-0 font-weight-bold text-primary">서비스 목록</h6>
+            <a href="{{ url_for('service.add_service') }}" class="btn btn-primary btn-sm">
+                <i class="fas fa-plus"></i> 서비스 추가
+            </a>
         </div>
         <div class="card-body">
             <div class="table-responsive">
-                <table class="table table-bordered" id="serviceTable" width="100%" cellspacing="0">
+                <table class="table table-bordered" id="servicesTable" width="100%" cellspacing="0">
                     <thead>
                         <tr>
                             <th>서비스 코드</th>
@@ -23,7 +22,7 @@
                             <th>서비스 구분</th>
                             <th>서비스 도메인</th>
                             <th>APP 코드</th>
-                            <th>액션</th>
+                            <th>관리</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -35,10 +34,10 @@
                             <td>{{ service.app_domain }}</td>
                             <td>{{ service.app_appcode }}</td>
                             <td>
-                                <a href="{{ url_for('service.edit_service', app_idx=service.app_idx) }}" class="btn btn-sm btn-info">
+                                <a href="{{ url_for('service.edit_service', app_idx=service.app_idx) }}" class="btn btn-info btn-sm">
                                     <i class="fas fa-edit"></i> 수정
                                 </a>
-                                <button class="btn btn-sm btn-danger delete-service" data-id="{{ service.app_idx }}" data-name="{{ service.app_name }}">
+                                <button class="btn btn-danger btn-sm delete-service" data-id="{{ service.app_idx }}" data-name="{{ service.app_name }}">
                                     <i class="fas fa-trash"></i> 삭제
                                 </button>
                             </td>
@@ -62,12 +61,12 @@
                 </button>
             </div>
             <div class="modal-body">
-                <p id="deleteConfirmText">서비스를 삭제하시겠습니까?</p>
-                <p class="text-danger">주의: 이 서비스와 연계된 모든 자산 관계도 삭제됩니다.</p>
+                <p>정말로 <span id="serviceName"></span> 서비스를 삭제하시겠습니까?</p>
+                <p class="text-danger">이 작업은 되돌릴 수 없으며, 모든 자산 연계 정보도 함께 삭제됩니다.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
-                <form id="deleteForm" action="" method="post">
+                <form id="deleteForm" method="POST">
                     <button type="submit" class="btn btn-danger">삭제</button>
                 </form>
             </div>
@@ -78,26 +77,27 @@
 <script>
 $(document).ready(function() {
     // DataTable 초기화
-    $('#serviceTable').DataTable({
+    $('#servicesTable').DataTable({
         language: {
             url: '/static/js/korean.json'
         },
         order: [[0, 'asc']]
     });
 
-    // 더블 클릭시 수정 페이지로 이동
-    $('.service-row').dblclick(function() {
+    // 서비스 행 더블 클릭 이벤트
+    $(document).on('dblclick', '.service-row', function() {
         var appIdx = $(this).data('id');
         window.location.href = "{{ url_for('service.edit_service', app_idx=0) }}".replace('0', appIdx);
     });
 
-    // 삭제 버튼 클릭
-    $('.delete-service').click(function(e) {
-        e.stopPropagation();
+    // 삭제 버튼 클릭 이벤트
+    $('.delete-service').on('click', function(e) {
+        e.stopPropagation();  // 행 더블클릭 이벤트 방지
+
         var appIdx = $(this).data('id');
         var serviceName = $(this).data('name');
 
-        $('#deleteConfirmText').text(`"${serviceName}" 서비스를 삭제하시겠습니까?`);
+        $('#serviceName').text(serviceName);
         $('#deleteForm').attr('action', "{{ url_for('service.delete_service', app_idx=0) }}".replace('0', appIdx));
         $('#deleteModal').modal('show');
     });

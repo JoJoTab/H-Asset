@@ -1582,7 +1582,7 @@ def bulk_upload():
         finally:
             db.close()
 
-        # 캐시 무효화
+        # ���시 무효화
         invalidate_cache_pattern('index_data')
         invalidate_cache_pattern('asset_data')
         invalidate_cache_pattern('asset_graph')

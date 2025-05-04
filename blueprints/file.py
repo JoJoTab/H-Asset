@@ -219,7 +219,7 @@ def delete_file(filename):
 
     # 파일 존재 여부 확인
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        flash('파일이 존재하지 않습니다.', 'error')
+        flash('파일이 존���하지 않습니다.', 'error')
         return redirect(url_for('file.fileindex'))
 
     # 파일 삭제

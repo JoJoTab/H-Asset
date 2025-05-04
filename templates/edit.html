@@ -318,28 +318,26 @@
     </form>
 </div>
 
-    <!-- 연계 서비스 관리 섹션 -->
-    <div class="card shadow mb-4">
-        <div class="card-header py-3">
-            <h6 class="m-0 font-weight-bold text-primary">연계 서비스</h6>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-bordered" id="linkedServicesTable" width="100%" cellspacing="0">
-                    <thead>
-                        <tr>
-                            <th>서비스 코드</th>
-                            <th>서비스명</th>
-                            <th>서비스 구분</th>
-                            <th>서비스 도메인</th>
-                            <th>APP 코드</th>
-                        </tr>
-                    </thead>
-                    <tbody id="linkedServices">
-                        <!-- 연계된 서비스가 여기에 동적으로 추가됩니다 -->
-                    </tbody>
-                </table>
-            </div>
+<div class="card shadow mb-4 mt-4">
+    <div class="card-header py-3 d-flex justify-content-between align-items-center">
+        <h6 class="m-0 font-weight-bold text-primary">연계 서비스</h6>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered" id="linkedServicesTable" width="100%" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>서비스 코드</th>
+                        <th>서비스명</th>
+                        <th>서비스 구분</th>
+                        <th>서비스 도메인</th>
+                        <th>APP 코드</th>
+                    </tr>
+                </thead>
+                <tbody id="linkedServices">
+                    <!-- 연계된 서비스가 여기에 동적으로 추가됩니다 -->
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -608,47 +606,61 @@
                 '&column=' + encodeURIComponent(column) +
                 '&location=' + encodeURIComponent(location);
         });
-    });
 
     // 연계 서비스 목록 가져오기
-    $.ajax({
-        url: "{{ url_for('service.get_linked_services', pnum=data.pnum) }}",
-        success: function(data) {
-            $('#linkedServices').empty();
+    function loadLinkedServices() {
+        $.ajax({
+            url: "/service/linked_services/" + {{ data.pnum }},
+            type: "GET",
+            dataType: "json",
+            success: function(data) {
+                $('#linkedServices').empty();
 
-            if (data.length === 0) {
-                $('#linkedServices').append('<tr><td colspan="5" class="text-center">연계된 서비스가 없습니다.</td></tr>');
-                return;
+                if (data.length === 0) {
+                    $('#linkedServices').append('<tr><td colspan="5" class="text-center">연계된 서비스가 없습니다.</td></tr>');
+                    return;
+                }
+
+                $.each(data, function(i, service) {
+                    var row = `
+                        <tr class="service-row" data-id="${service.app_idx}">
+                            <td>${service.app_servicecode || ''}</td>
+                            <td>${service.app_name || ''}</td>
+                            <td>${service.app_group || ''}</td>
+                            <td>${service.app_domain || ''}</td>
+                            <td>${service.app_appcode || ''}</td>
+                        </tr>
+                    `;
+                    $('#linkedServices').append(row);
+                });
+
+                // 서비스 행 더블 클릭 이벤트
+                $('.service-row').dblclick(function() {
+                    var appIdx = $(this).data('id');
+                    window.location.href = "/service/edit/" + appIdx;
+                });
+
+                // DataTable 초기화
+                if ($.fn.DataTable.isDataTable('#linkedServicesTable')) {
+                    $('#linkedServicesTable').DataTable().destroy();
+                }
+
+                $('#linkedServicesTable').DataTable({
+                    language: {
+                        url: '/static/js/korean.json'
+                    },
+                    order: [[0, 'asc']]
+                });
+            },
+            error: function(xhr, status, error) {
+                console.error("서비스 정보를 가져오는 중 오류가 발생했습니다:", error);
+                $('#linkedServices').html('<tr><td colspan="5" class="text-center text-danger">서비스 정보를 가져오는 중 오류가 발생했습니다.</td></tr>');
             }
+        });
+    }
 
-            $.each(data, function(i, service) {
-                var row = `
-                    <tr class="service-row" data-id="${service.app_idx}">
-                        <td>${service.app_servicecode || ''}</td>
-                        <td>${service.app_name || ''}</td>
-                        <td>${service.app_group || ''}</td>
-                        <td>${service.app_domain || ''}</td>
-                        <td>${service.app_appcode || ''}</td>
-                    </tr>
-                `;
-                $('#linkedServices').append(row);
-            });
-
-            // 서비스 행 더블 클릭 이벤트
-            $('.service-row').dblclick(function() {
-                var appIdx = $(this).data('id');
-                window.location.href = "/service/edit/" + appIdx;
-            });
-        }
+    // 페이지 로드 시 연계 서비스 목록 가져오기
+    loadLinkedServices();
     });
-
-    // DataTable 초기화
-    $('#linkedServicesTable').DataTable({
-        language: {
-            url: '/static/js/korean.json'
-        },
-        order: [[0, 'asc']]
-    });
-});
 </script>
 {% endblock %}

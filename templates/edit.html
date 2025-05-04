@@ -3,6 +3,20 @@
 {% block content %}
 <h2>자산 수정</h2>
 <hr width="100%" class="divider"/>
+
+<!-- 계층 구조 표시 -->
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        {% for item in hierarchy %}
+            {% if item.active %}
+                <li class="breadcrumb-item active" aria-current="page">{{ item.name }}</li>
+            {% else %}
+                <li class="breadcrumb-item"><a href="{{ item.url }}">{{ item.name }}</a></li>
+            {% endif %}
+        {% endfor %}
+    </ol>
+</nav>
+
 <hr>
 <div class="contents">
     <form action="{{ url_for('asset.edit_asset', pnum=data.pnum) }}" method="POST">
@@ -62,15 +76,26 @@
             </div>
             <div class="col-md-3">
                 <div class="form-group">
-                    <label for="isvm">VM 여부:</label>
-                    <select class="form-control" id="isvm" name="isvm" required>
-                        <option value="0" {% if data.isvm == 0 %}selected{% endif %}>아니오</option>
-                        <option value="1" {% if data.isvm == 1 %}selected{% endif %}>예</option>
+                    <label for="domain">도메인:</label>
+                    <select class="form-control" id="domain" name="domain" required>
+                        {% for option in domain_options %}
+                        <option value="{{ option.state }}" {% if data.domain_state == option.state %}selected{% endif %}>{{ option.state }}</option>
+                        {% endfor %}
                     </select>
                 </div>
             </div>
         </div>
         <div class="row">
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="group">그룹:</label>
+                    <select class="form-control" id="group" name="group" required>
+                        {% for option in group_options %}
+                        <option value="{{ option.group }}" {% if data.group == option.group %}selected{% endif %}>{{ option.state }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="datein">설치일자:</label>
@@ -89,14 +114,14 @@
                     <input type="text" class="form-control" id="charge" name="charge" value="{{ data.charge }}">
                 </div>
             </div>
+        </div>
+        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="charge2">담당자(부):</label>
                     <input type="text" class="form-control" id="charge2" name="charge2" value="{{ data.charge2 }}">
                 </div>
             </div>
-        </div>
-        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="isoper">사용여부:</label>
@@ -127,14 +152,14 @@
                     </select>
                 </div>
             </div>
+        </div>
+        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="pdu">PDU:</label>
                     <input type="text" class="form-control" id="pdu" name="pdu" value="{{ data.pdu }}">
                 </div>
             </div>
-        </div>
-        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="os">OS:</label>
@@ -157,28 +182,18 @@
                     <input type="text" class="form-control" id="maker" name="maker" value="{{ data.maker }}">
                 </div>
             </div>
+        </div>
+        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="model">모델명:</label>
                     <input type="text" class="form-control" id="model" name="model" value="{{ data.model }}">
                 </div>
             </div>
-        </div>
-        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="serial">시리얼넘버:</label>
                     <input type="text" class="form-control" id="serial" name="serial" value="{{ data.serial }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="domain">도메인:</label>
-                    <select class="form-control" id="domain" name="domain">
-                        {% for option in domain_options %}
-                        <option value="{{ option.state }}" {% if data.domain_state == option.state %}selected{% endif %}>{{ option.state }}</option>
-                        {% endfor %}
-                    </select>
                 </div>
             </div>
             <div class="col-md-3">
@@ -208,7 +223,7 @@
                 </div>
             </div>
         </div>
-        <div class="row vm-parent-row" {% if data.isvm != 1 %}style="display: none;"{% endif %}>
+        <div class="row vm-parent-row" {% if data.group != 1 %}style="display: none;"{% endif %}>
             <div class="col-md-12">
                 <div class="form-group">
                     <label for="vcenter_display">상위 자산:</label>
@@ -221,7 +236,7 @@
                             <button class="btn btn-outline-danger" type="button" id="clearParentAsset">초기화</button>
                         </div>
                     </div>
-                    <small class="form-text text-muted">가상 머신인 경우 상위 물리 서버를 선택하세요.</small>
+                    <small class="form-text text-muted">논리 자산인 경우 상위 물리 자산을 선택하세요.</small>
                 </div>
             </div>
         </div>
@@ -303,6 +318,32 @@
     </form>
 </div>
 
+    <!-- 연계 서비스 관리 섹션 -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">연계 서비스</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="linkedServicesTable" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>서비스 코드</th>
+                            <th>서비스명</th>
+                            <th>서비스 구분</th>
+                            <th>서비스 도메인</th>
+                            <th>APP 코드</th>
+                        </tr>
+                    </thead>
+                    <tbody id="linkedServices">
+                        <!-- 연계된 서비스가 여기에 동적으로 추가됩니다 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- 상위 자산 검색 모달 -->
 <div class="modal fade" id="parentAssetModal" tabindex="-1" role="dialog" aria-labelledby="parentAssetModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">
@@ -367,13 +408,46 @@
     .card-body {
         padding: 0.75rem;
     }
+    .breadcrumb {
+        background-color: #f8f9fa;
+        padding: 0.75rem 1rem;
+        margin-bottom: 1rem;
+        border-radius: 0.25rem;
+    }
 </style>
 
 <script>
     $(document).ready(function() {
-        // VM 여부에 따라 상위 자산 필드 표시/숨김
-        $('#isvm').on('change', function() {
-            if ($(this).val() === '1') {
+        // 도메인 변경 시 그룹 옵션 업데이트
+        $('#domain').on('change', function() {
+            const domain = $(this).val();
+
+            // AJAX 요청으로 해당 도메인의 그룹 옵션 가져오기
+            $.ajax({
+                url: '/get_groups',
+                method: 'GET',
+                data: { domain: domain },
+                success: function(data) {
+                    const groupSelect = $('#group');
+                    groupSelect.empty();
+
+                    // 그룹 옵션 추가
+                    data.forEach(function(group) {
+                        groupSelect.append($('<option>', {
+                            value: group.group,
+                            text: group.state
+                        }));
+                    });
+
+                    // 그룹 변경 이벤트 트리거
+                    groupSelect.trigger('change');
+                }
+            });
+        });
+
+        // 그룹 변경 시 상위 자산 필드 표시/숨김
+        $('#group').on('change', function() {
+            if ($(this).val() === '1') {  // 논리(VM) 그룹인 경우
                 $('.vm-parent-row').show();
             } else {
                 $('.vm-parent-row').hide();
@@ -414,11 +488,11 @@
                 return;
             }
 
-            // AJAX 요청으로 자산 검색
+            // AJAX 요청으로 자산 검색 (물리 서버만 검색)
             $.ajax({
                 url: '/search_assets',
                 method: 'GET',
-                data: { term: searchTerm },
+                data: { term: searchTerm, group: 0 },  // group=0은 물리 서버
                 success: function(data) {
                     var resultsBody = $('#searchResultsBody');
                     resultsBody.empty();
@@ -521,7 +595,7 @@
             // 상면번호 파싱 (예: "1F-R01-01" -> floor="1F", column="R01", location="01")
             var parts = loc1.split('-');
             if (parts.length !== 3) {
-                alert('상면���호 형식이 올바르지 않습니다. (예: 1F-R01-01)');
+                alert('상면번호 형식이 올바르지 않습니다. (예: 1F-R01-01)');
                 return;
             }
 
@@ -535,5 +609,46 @@
                 '&location=' + encodeURIComponent(location);
         });
     });
+
+    // 연계 서비스 목록 가져오기
+    $.ajax({
+        url: "{{ url_for('service.get_linked_services', pnum=data.pnum) }}",
+        success: function(data) {
+            $('#linkedServices').empty();
+
+            if (data.length === 0) {
+                $('#linkedServices').append('<tr><td colspan="5" class="text-center">연계된 서비스가 없습니다.</td></tr>');
+                return;
+            }
+
+            $.each(data, function(i, service) {
+                var row = `
+                    <tr class="service-row" data-id="${service.app_idx}">
+                        <td>${service.app_servicecode || ''}</td>
+                        <td>${service.app_name || ''}</td>
+                        <td>${service.app_group || ''}</td>
+                        <td>${service.app_domain || ''}</td>
+                        <td>${service.app_appcode || ''}</td>
+                    </tr>
+                `;
+                $('#linkedServices').append(row);
+            });
+
+            // 서비스 행 더블 클릭 이벤트
+            $('.service-row').dblclick(function() {
+                var appIdx = $(this).data('id');
+                window.location.href = "/service/edit/" + appIdx;
+            });
+        }
+    });
+
+    // DataTable 초기화
+    $('#linkedServicesTable').DataTable({
+        language: {
+            url: '/static/js/korean.json'
+        },
+        order: [[0, 'asc']]
+    });
+});
 </script>
 {% endblock %}

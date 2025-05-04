@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, request, jsonify, flash, send_file
+from flask import Blueprint, render_template, redirect, url_for, request, jsonify, flash, send_file, session
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -12,6 +12,7 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment, Protecti
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from utils.auto_register import handle_auto_registered_assets
+from utils.hierarchy import get_asset_hierarchy
 
 asset_bp = Blueprint('asset', __name__)
 
@@ -32,13 +33,15 @@ def index():
                io_isoper.state AS isoper_state, 
                io_oper.state AS oper_state, 
                io_power.state AS power_state, 
-               io_os.state AS os_state 
+               io_os.state AS os_state,
+               ig.state AS group_state
         FROM total_asset ta 
         JOIN info_domain id ON ta.domain = id.domain
         LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
         LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
         LEFT JOIN info_power io_power ON ta.power = io_power.power
         LEFT JOIN info_os io_os ON ta.os = io_os.os
+        LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
         WHERE ta.isfix IN (1, 2)
         ORDER BY ta.isfix DESC, ta.dateupdate DESC
     """
@@ -113,8 +116,8 @@ def get_data():
     # 개수 계산
     total_assets = len(df)
     total_servers = len(df[df['domain'] == 0])
-    physical_servers = len(df[(df['domain'] == 0) & (df['isvm'] == 0)])
-    virtual_servers = len(df[(df['domain'] == 0) & (df['isvm'] == 1)])
+    physical_servers = len(df[(df['domain'] == 0) & (df['group'] == 0)])
+    virtual_servers = len(df[(df['domain'] == 0) & (df['group'] == 1)])
 
     # 현재 날짜 기준 계산
     current_date = pd.to_datetime('now')
@@ -162,13 +165,15 @@ def generate_asset_graph():
                        io_isoper.state AS isoper_state, 
                        io_oper.state AS oper_state, 
                        io_power.state AS power_state, 
-                       io_os.state AS os_state 
+                       io_os.state AS os_state,
+                       ig.state AS group_state
                 FROM hli_asset.total_asset ta 
                 JOIN hli_asset.info_domain id ON ta.domain = id.domain
                 LEFT JOIN hli_asset.info_isoper io_isoper ON ta.isoper = io_isoper.isoper
                 LEFT JOIN hli_asset.info_oper io_oper ON ta.oper = io_oper.oper
                 LEFT JOIN hli_asset.info_power io_power ON ta.power = io_power.power
                 LEFT JOIN hli_asset.info_os io_os ON ta.os = io_os.os
+                LEFT JOIN hli_asset.info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
                 WHERE ta.isfix = 0 AND io_isoper.state = '사용'
                 ORDER BY ta.dateinsert
                 """
@@ -187,20 +192,6 @@ def generate_asset_graph():
     # 데이터 변환 및 집계
     df_graph['datein'] = pd.to_datetime(df_graph['datein'])
     df_graph['dateout'] = pd.to_datetime(df_graph['dateout'])
-
-    # 최근 1년 데이터만 필터링
-    # one_year_ago = pd.Timestamp.now() - pd.DateOffset(years=1)
-    # df_recent = df_graph[df_graph['datein'] >= one_year_ago]
-
-    # 1. 최근 1년간 누적 자산 막대 그래프
-    # df_recent['month'] = df_recent['datein'].dt.to_period('M').astype(str)
-    # monthly_counts = df_recent.groupby(['month', 'domain_state']).size().unstack(fill_value=0)
-
-    # 누적 계산
-    # cumulative_counts = monthly_counts.cumsum()
-
-    # fig1 = px.bar(cumulative_counts, title='최근 1년간 누적 자산',
-    #              labels={'value': '개수', 'month': '월'}, barmode='stack')
 
     # 최근 1년 기간 설정
     one_year_ago = pd.Timestamp.now() - pd.DateOffset(years=1)
@@ -264,10 +255,6 @@ def generate_asset_graph():
         discarded=('dateout', lambda x: x.notnull().sum())  # 폐기된 자산 수
     ).reset_index()
 
-    # # 데이터 타입 일치시키기
-    # monthly_data['installed'] = monthly_data['installed'].astype(int)
-    # monthly_data['discarded'] = monthly_data['discarded'].astype(int)
-
     # wide-form에서 long-form으로 변환
     monthly_data_long = pd.melt(
         monthly_data,
@@ -330,7 +317,7 @@ def index_detail():
 
     # 기본 선택 열 설정 (아무것도 선택되지 않았을 경우)
     if not selected_columns:
-        selected_columns = ['domain', 'servername', 'ip', 'hostname', 'os', 'osver']
+        selected_columns = ['domain', 'group', 'servername', 'ip', 'hostname', 'os', 'osver']
 
     # 항상 포함되어야 하는 필수 열 (pnum은 자세히 링크에 필요)
     required_columns = ['pnum']
@@ -345,7 +332,7 @@ def index_detail():
         'center': '센터',
         'loc1': '상면번호',
         'loc2': '상단번호',
-        'isvm': 'VM 여부',
+        'group': '그룹',
         'vcenter': '상위자산',
         'datein': '설치일자',
         'dateout': '폐기일자',
@@ -375,7 +362,8 @@ def index_detail():
     select_columns = list(dict.fromkeys(select_columns))
 
     # 기본 테이블 열
-    base_columns = [f"ta.{col}" for col in select_columns if col not in ['domain', 'isoper', 'oper', 'power', 'os']]
+    base_columns = [f"ta.{col}" for col in select_columns if
+                    col not in ['domain', 'isoper', 'oper', 'power', 'os', 'group']]
 
     # JOIN 테이블 열 (상태 값)
     join_columns = []
@@ -389,6 +377,8 @@ def index_detail():
         join_columns.append("io_power.state AS power_state")
     if 'os' in select_columns:
         join_columns.append("io_os.state AS os_state")
+    if 'group' in select_columns:
+        join_columns.append("ig.state AS group_state")
 
     # 모든 열 합치기
     all_columns = base_columns + join_columns
@@ -410,9 +400,27 @@ def index_detail():
         sql += " LEFT JOIN info_power io_power ON ta.power = io_power.power"
     if 'os' in select_columns:
         sql += " LEFT JOIN info_os io_os ON ta.os = io_os.os"
+    if 'group' in select_columns:
+        sql += " LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain"
 
     sql += " WHERE 1=1"
     params = []
+
+    # 기본적으로 isfix=0인 자산만 검색
+    if 'isfix' not in request.form and 'isfix' not in request.args:
+        sql += " AND ta.isfix = 0"
+
+    # 계층 구조 필터링
+    domain_filter = request.args.get('domain', type=int)
+    group_filter = request.args.get('group', type=int)
+
+    if domain_filter is not None:
+        sql += " AND ta.domain = %s"
+        params.append(domain_filter)
+
+    if group_filter is not None:
+        sql += " AND ta.`group` = %s"
+        params.append(group_filter)
 
     if request.method == 'POST':
         # 입력값 가져오기
@@ -423,7 +431,7 @@ def index_detail():
         center = request.form.get('center', None)
         loc1 = request.form.get('loc1', None)
         loc2 = request.form.get('loc2', None, type=int)
-        isvm = request.form.get('isvm', None, type=int)
+        group = request.form.get('group', None, type=int)
         vcenter = request.form.get('vcenter', None, type=int)
         datein = request.form.get('datein', None)
         dateout = request.form.get('dateout', None)
@@ -464,9 +472,9 @@ def index_detail():
         if loc2 is not None:
             sql += " AND ta.loc2 = %s"
             params.append(loc2)
-        if isvm is not None:
-            sql += " AND ta.isvm = %s"
-            params.append(isvm)
+        if group is not None:
+            sql += " AND ta.`group` = %s"
+            params.append(group)
         if vcenter is not None:
             sql += " AND ta.vcenter = %s"
             params.append(vcenter)
@@ -510,8 +518,8 @@ def index_detail():
             sql += " AND ta.serial LIKE %s"
             params.append(f'%{serial}%')
         if domain:
-            sql += " AND ta.domain LIKE %s"
-            params.append(f'%{domain}%')
+            sql += " AND ta.domain = %s"
+            params.append(domain)
         if charge3:
             sql += " AND ta.charge3 LIKE %s"
             params.append(f'%{charge3}%')
@@ -522,13 +530,33 @@ def index_detail():
     # 정렬 추가
     sql += " ORDER BY ta.dateupdate DESC LIMIT 1000"  # 성능을 위해 결과 제한
 
+    # 마지막 검색 쿼리와 파라미터를 세션에 저장 (내보내기용)
+    session['last_search_query'] = sql
+    session['last_search_params'] = params
+
     # 데이터 가져오기
     data = execute_query(sql, params)
+
+    # 계층 구조 가져오기
+    hierarchy = get_asset_hierarchy(domain=domain_filter, group=group_filter)
+
+    # 도메인 및 그룹 옵션 가져오기
+    domain_options = execute_query("SELECT * FROM info_domain")
+
+    group_options = []
+    if domain_filter is not None:
+        group_sql = "SELECT * FROM info_group WHERE domain = %s"
+        group_options = execute_query(group_sql, (domain_filter,))
 
     return render_template('index_detail.html',
                            data=data,
                            selected_columns=selected_columns,
-                           column_mapping=column_mapping)
+                           column_mapping=column_mapping,
+                           hierarchy=hierarchy,
+                           domain_options=domain_options,
+                           group_options=group_options,
+                           domain_filter=domain_filter,
+                           group_filter=group_filter)
 
 
 @asset_bp.route('/get_asset_details/<int:pnum>')
@@ -540,20 +568,22 @@ def get_asset_details(pnum):
                io_isoper.state AS isoper_state, 
                io_oper.state AS oper_state, 
                io_power.state AS power_state, 
-               io_os.state AS os_state 
+               io_os.state AS os_state,
+               ig.state AS group_state
         FROM total_asset ta 
         JOIN info_domain id ON ta.domain = id.domain
         LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
         LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
         LEFT JOIN info_power io_power ON ta.power = io_power.power
         LEFT JOIN info_os io_os ON ta.os = io_os.os
+        LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
         WHERE ta.pnum = %s
     """
 
     data = execute_query(sql, (pnum,), fetch_all=False)
 
     # vcenter 값이 있는 경우 상위 자산 정보 가져오기
-    if data and data.get('isvm') == 1 and data.get('vcenter'):
+    if data and data.get('group') == 1 and data.get('vcenter'):
         parent_sql = """
             SELECT pnum, servername, hostname, ip
             FROM total_asset
@@ -566,25 +596,40 @@ def get_asset_details(pnum):
     return jsonify(data)
 
 
+@asset_bp.route('/get_groups', methods=['GET'])
+def get_groups():
+    """도메인에 따른 그룹 정보 가져오기"""
+    domain = request.args.get('domain', type=int)
+
+    if domain is None:
+        return jsonify([])
+
+    sql = "SELECT `group`, state FROM info_group WHERE domain = %s"
+    groups = execute_query(sql, (domain,))
+
+    return jsonify(groups)
+
+
 @asset_bp.route('/search_assets', methods=['GET'])
 def search_assets():
     """자산 검색 API (AJAX 요청용)"""
     search_term = request.args.get('term', '')
+    group = request.args.get('group', 0, type=int)  # 기본값은 물리 서버(0)
 
     # 검색어가 없으면 빈 결과 반환
     if not search_term:
         return jsonify([])
 
-    # 물리 서버만 검색 (isvm = 0)
+    # 그룹 필터링 조건 추가
     sql = """
         SELECT pnum, servername, hostname, ip
         FROM total_asset
-        WHERE isvm = 0 AND (servername LIKE %s OR hostname LIKE %s OR ip LIKE %s)
+        WHERE `group` = %s AND (servername LIKE %s OR hostname LIKE %s OR ip LIKE %s)
         LIMIT 20
     """
 
     search_param = f'%{search_term}%'
-    results = execute_query(sql, (search_param, search_param, search_param))
+    results = execute_query(sql, (group, search_param, search_param, search_param))
 
     return jsonify(results)
 
@@ -599,18 +644,22 @@ def write_asset():
     os_options = execute_query("SELECT * FROM info_os")
     domain_options = execute_query("SELECT * FROM info_domain")
 
+    # 계층 구조 가져오기
+    hierarchy = get_asset_hierarchy()
+
     return render_template('write.html',
                            isoper_options=isoper_options,
                            oper_options=oper_options,
                            power_options=power_options,
                            os_options=os_options,
-                           domain_options=domain_options)
+                           domain_options=domain_options,
+                           hierarchy=hierarchy)
 
 
 @asset_bp.route('/add', methods=['POST'])
 def add_asset():
     """자산 추가 처리"""
-    sql = """INSERT INTO total_asset (itamnum, servername, ip, hostname, center, loc1, loc2, isvm, vcenter, 
+    sql = """INSERT INTO total_asset (itamnum, servername, ip, hostname, center, loc1, loc2, `group`, vcenter, 
             datein, dateout, charge, charge2, isoper, oper, power, pdu, os, osver, maker, model, serial, domain, 
             charge3, usize, cpucore, memory, isfix, dateupdate) 
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
@@ -624,11 +673,11 @@ def add_asset():
     center = request.form.get('center')
     loc1 = request.form.get('loc1')
     loc2 = request.form.get('loc2', type=int)
-    isvm = request.form.get('isvm', type=int)
+    group = request.form.get('group', type=int)
 
-    # vcenter 값 처리 - isvm이 1(가상머신)인 경우에만 vcenter 값을 사용
+    # vcenter 값 처리 - group이 1(논리)인 경우에만 vcenter 값을 사용
     vcenter = None
-    if isvm == 1:
+    if group == 1:
         vcenter = request.form.get('vcenter', type=int)
         # vcenter 값이 없거나 0인 경우 None으로 설정
         if not vcenter:
@@ -697,7 +746,7 @@ def add_asset():
 
             # 데이터 삽입
             cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
-                                 isvm, vcenter, datein, dateout, charge, charge2,
+                                 group, vcenter, datein, dateout, charge, charge2,
                                  isoper, oper, power, pdu, os_code, osver, maker, model, serial, domain, charge3,
                                  usize, cpucore, memory, isfix, dateupdate))
             db.commit()
@@ -717,7 +766,7 @@ def edit_asset(pnum):
     """자산 수정 페이지 및 처리"""
     if request.method == 'POST':
         sql = """UPDATE total_asset SET itamnum = %s, servername = %s, ip = %s, 
-                      hostname = %s, center = %s, loc1 = %s, loc2 = %s, isvm = %s, vcenter = %s,
+                      hostname = %s, center = %s, loc1 = %s, loc2 = %s, `group` = %s, vcenter = %s,
                       datein = %s, dateout = %s, charge = %s, charge2 = %s, 
                       isoper = %s, oper = %s, power = %s, pdu = %s, os = %s, 
                       osver = %s, maker = %s, model = %s, serial = %s, domain = %s, charge3 = %s,
@@ -732,11 +781,11 @@ def edit_asset(pnum):
         center = request.form.get('center')
         loc1 = request.form.get('loc1')
         loc2 = request.form.get('loc2', type=int)
-        isvm = request.form.get('isvm', type=int)
+        group = request.form.get('group', type=int)
 
-        # vcenter 값 처리 - isvm이 1(가상머신)인 경우에만 vcenter 값을 사용
+        # vcenter 값 처리 - group이 1(논리)인 경우에만 vcenter 값을 사용
         vcenter = None
-        if isvm == 1:
+        if group == 1:
             vcenter = request.form.get('vcenter', type=int)
             # vcenter 값이 없거나 0인 경우 None으로 설정
             if not vcenter:
@@ -805,7 +854,7 @@ def edit_asset(pnum):
 
                 # 데이터 업데이트
                 cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
-                                     isvm, vcenter, datein, dateout, charge, charge2,
+                                     group, vcenter, datein, dateout, charge, charge2,
                                      isoper, oper, power, pdu, os_code, osver, maker, model, serial, domain, charge3,
                                      usize, cpucore, memory, isfix, dateupdate, pnum))
                 db.commit()
@@ -826,20 +875,22 @@ def edit_asset(pnum):
                io_oper.state AS oper_state,
                io_os.state AS os_state,
                io_domain.state AS domain_state,
-               io_power.state AS power_state
+               io_power.state AS power_state,
+               ig.state AS group_state
         FROM total_asset ta
         LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
         LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
         LEFT JOIN info_os io_os ON ta.os = io_os.os
         LEFT JOIN info_domain io_domain ON ta.domain = io_domain.domain
         LEFT JOIN info_power io_power ON ta.power = io_power.power
+        LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
         WHERE ta.pnum = %s
     """
     data = execute_query(sql, (pnum,), fetch_all=False)
 
     # 상위 자산 정보 가져오기 (vcenter가 있는 경우)
     parent_asset = None
-    if data and data.get('isvm') == 1 and data.get('vcenter'):
+    if data and data.get('group') == 1 and data.get('vcenter'):
         parent_sql = """
             SELECT pnum, servername, hostname, ip
             FROM total_asset
@@ -852,7 +903,7 @@ def edit_asset(pnum):
     child_sql = """
         SELECT pnum, servername, hostname, ip
         FROM total_asset
-        WHERE vcenter = %s AND isvm = 1
+        WHERE vcenter = %s AND `group` = 1
         ORDER BY servername
     """
     child_assets = execute_query(child_sql, (pnum,))
@@ -864,6 +915,15 @@ def edit_asset(pnum):
     domain_options = execute_query("SELECT * FROM info_domain")
     power_options = execute_query("SELECT * FROM info_power")
 
+    # 도메인에 따른 그룹 옵션 가져오기
+    group_options = []
+    if data and data.get('domain') is not None:
+        group_sql = "SELECT * FROM info_group WHERE domain = %s"
+        group_options = execute_query(group_sql, (data['domain'],))
+
+    # 계층 구조 가져오기
+    hierarchy = get_asset_hierarchy(pnum=pnum, domain=data.get('domain'), group=data.get('group'))
+
     return render_template('edit.html',
                            data=data,
                            parent_asset=parent_asset,
@@ -872,7 +932,9 @@ def edit_asset(pnum):
                            oper_options=oper_options,
                            os_options=os_options,
                            domain_options=domain_options,
-                           power_options=power_options)
+                           power_options=power_options,
+                           group_options=group_options,
+                           hierarchy=hierarchy)
 
 
 @asset_bp.route('/delete/<int:pnum>')
@@ -896,7 +958,7 @@ def export_asset():
     sql = """
         SELECT 
             ta.pnum, ta.itamnum, ta.servername, ta.ip, ta.hostname, ta.center, 
-            ta.loc1, ta.loc2, ta.isvm, ta.vcenter, ta.datein, ta.dateout, 
+            ta.loc1, ta.loc2, ig.state AS group_state, ta.vcenter, ta.datein, ta.dateout, 
             ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
             io_power.state AS power, ta.pdu, io_os.state AS os, ta.osver, 
             ta.maker, ta.model, ta.serial, io_domain.state AS domain, ta.charge3,
@@ -907,6 +969,7 @@ def export_asset():
         LEFT JOIN info_power io_power ON ta.power = io_power.power
         LEFT JOIN info_os io_os ON ta.os = io_os.os
         LEFT JOIN info_domain io_domain ON ta.domain = io_domain.domain
+        LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
     """
     data = execute_query(sql)
 
@@ -923,7 +986,7 @@ def export_asset():
         'center': '센터',
         'loc1': '상면번호',
         'loc2': '상단번호',
-        'isvm': 'VM여부',
+        'group_state': '그룹',
         'vcenter': '상위 자산',
         'datein': '설치일자',
         'dateout': '폐기일자',
@@ -952,10 +1015,6 @@ def export_asset():
     # 컬럼명 변경
     df.rename(columns=column_mapping, inplace=True)
 
-    # VM여부 값 변환 (0 -> '아니오', 1 -> '예')
-    if 'VM여부' in df.columns:
-        df['VM여부'] = df['VM여부'].map({0: '아니오', 1: '예'})
-
     # 변경확인 값 변환 (0 -> '확인완료', 1 -> '확인필요')
     if '변경확인' in df.columns:
         df['변경확인'] = df['변경확인'].map({0: '확인완료', 1: '확인필요'})
@@ -975,6 +1034,105 @@ def export_asset():
 
         # 열 너비 자동 조정
         worksheet = writer.sheets['자산목록']
+        for i, column in enumerate(df.columns):
+            column_width = max(df[column].astype(str).map(len).max(), len(column) + 2)
+            worksheet.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = column_width
+
+    return send_file(export_filepath, as_attachment=True)
+
+
+@asset_bp.route('/export_filtered_asset')
+def export_filtered_asset():
+    """현재 검색된 자산 데이터만 내보내기"""
+    # 세션에서 마지막 검색 쿼리와 파라미터 가져오기
+    last_search_query = session.get('last_search_query')
+    last_search_params = session.get('last_search_params', [])
+
+    if not last_search_query:
+        # 검색 쿼리가 없으면 기본 쿼리 사용 (isfix=0인 자산만)
+        last_search_query = """
+            SELECT 
+                ta.pnum, ta.itamnum, ta.servername, ta.ip, ta.hostname, ta.center, 
+                ta.loc1, ta.loc2, ig.state AS group_state, ta.vcenter, ta.datein, ta.dateout, 
+                ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
+                io_power.state AS power, ta.pdu, io_os.state AS os, ta.osver, 
+                ta.maker, ta.model, ta.serial, io_domain.state AS domain, ta.charge3,
+                ta.usize, ta.vmpnum, ta.dateinsert, ta.cpucore, ta.memory, ta.dateupdate, ta.isfix
+            FROM total_asset ta
+            LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
+            LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
+            LEFT JOIN info_power io_power ON ta.power = io_power.power
+            LEFT JOIN info_os io_os ON ta.os = io_os.os
+            LEFT JOIN info_domain io_domain ON ta.domain = io_domain.domain
+            LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
+            WHERE ta.isfix = 0
+        """
+        last_search_params = []
+
+    # 데이터 가져오기
+    data = execute_query(last_search_query, last_search_params)
+
+    # 데이터프레임 생성
+    df = pd.DataFrame(data)
+
+    # 컬럼명 한글로 변경
+    column_mapping = {
+        'pnum': '자산고유번호',
+        'itamnum': 'ITAM자산번호',
+        'servername': '서버명',
+        'ip': 'IP 주소',
+        'hostname': '호스트 이름',
+        'center': '센터',
+        'loc1': '상면번호',
+        'loc2': '상단번호',
+        'group_state': '그룹',
+        'vcenter': '상위 자산',
+        'datein': '설치일자',
+        'dateout': '폐기일자',
+        'charge': '담당자(정)',
+        'charge2': '담당자(부)',
+        'isoper': '사용여부',
+        'oper': '서비스구분',
+        'power': '전원이중화',
+        'pdu': 'PDU',
+        'os': 'OS',
+        'osver': 'OS버전',
+        'maker': '제조사',
+        'model': '모델',
+        'serial': '시리얼넘버',
+        'domain': '도메인',
+        'charge3': '현업담당자',
+        'usize': '장비크기',
+        'vmpnum': 'VM번호',
+        'dateinsert': '등록일시',
+        'cpucore': '물리코어',
+        'memory': '메모리크기',
+        'dateupdate': '업데이트일시',
+        'isfix': '변경확인'
+    }
+
+    # 컬럼명 변경
+    df.rename(columns=column_mapping, inplace=True)
+
+    # 변경확인 값 변환 (0 -> '확인완료', 1 -> '확인필요')
+    if '변경확인' in df.columns:
+        df['변경확인'] = df['변경확인'].map({0: '확인완료', 1: '확인필요'})
+
+    # 엑셀 파일로 저장
+    today = datetime.now().strftime('%Y%m%d')
+    export_filename = f'asset_filtered_{today}.xlsx'
+    export_filepath = os.path.join(os.getcwd(), 'exports', export_filename)
+
+    # exports 폴더가 없으면 생성
+    if not os.path.exists(os.path.dirname(export_filepath)):
+        os.makedirs(os.path.dirname(export_filepath))
+
+    # 엑셀 파일 생성
+    with pd.ExcelWriter(export_filepath, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='검색결과')
+
+        # 열 너비 자동 조정
+        worksheet = writer.sheets['검색결과']
         for i, column in enumerate(df.columns):
             column_width = max(df[column].astype(str).map(len).max(), len(column) + 2)
             worksheet.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = column_width
@@ -1007,13 +1165,13 @@ def download_template():
     # 헤더 행 추가
     headers = [
         '서버명*', 'IP 주소*', '호스트 이름', 'ITAM자산번호', '센터', '상면번호', '상단번호',
-        'VM여부*', '설치일자', '폐기일자', '담당자(정)', '담당자(부)', '사용여부*',
+        '도메인*', '그룹*', '설치일자', '폐기일자', '담당자(정)', '담당자(부)', '사용여부*',
         '서비스구분*', '전원이중화', 'PDU', 'OS*', 'OS버전', '제조사', '모델',
-        '시리얼넘버', '도메인*', '현업담당자', '장비크기(U)', '물리코어', '메모리(GB)', '상위자산'
+        '시리얼넘버', '현업담당자', '장비크기(U)', '물리코어', '메모리(GB)', '상위자산'
     ]
 
     # 필수 입력 필드 표시
-    required_fields = ['서버명*', 'IP 주소*', 'VM여부*', '사용여부*', '서비스구분*', 'OS*', '도메인*']
+    required_fields = ['서버명*', 'IP 주소*', '도메인*', '그룹*', '사용여부*', '서비스구분*', 'OS*']
 
     # 헤더 행 스타일 적용
     for col_idx, header in enumerate(headers, 1):
@@ -1028,12 +1186,23 @@ def download_template():
         ws.column_dimensions[get_column_letter(col_idx)].width = max(len(header) * 1.5, 15)
 
     # 데이터 유효성 검사 설정
-    # VM여부 (예/아니오)
-    vm_validation = DataValidation(type="list", formula1='"예,아니오"', allow_blank=True)
-    vm_validation.error = "VM여부는 '예' 또는 '아니오'만 선택 가능합니다."
-    vm_validation.errorTitle = "입력 오류"
-    ws.add_data_validation(vm_validation)
-    vm_validation.add(f"H2:H1000")
+    # 도메인 드롭다운
+    domain_options = execute_query("SELECT state FROM info_domain")
+    domain_list = ','.join([f'"{option["state"]}"' for option in domain_options])
+    domain_validation = DataValidation(type="list", formula1=f'"{domain_list}"', allow_blank=True)
+    domain_validation.error = "올바른 도메인을 선택하세요."
+    domain_validation.errorTitle = "입력 오류"
+    ws.add_data_validation(domain_validation)
+    domain_validation.add(f"H2:H1000")
+
+    # 그룹 드롭다운 (도메인별로 다르므로 일반적인 목록만 제공)
+    group_options = execute_query("SELECT DISTINCT state FROM info_group")
+    group_list = ','.join([f'"{option["state"]}"' for option in group_options])
+    group_validation = DataValidation(type="list", formula1=f'"{group_list}"', allow_blank=True)
+    group_validation.error = "올바른 그룹을 선택하세요."
+    group_validation.errorTitle = "입력 오류"
+    ws.add_data_validation(group_validation)
+    group_validation.add(f"I2:I1000")
 
     # 사용여부 드롭다운
     isoper_options = execute_query("SELECT state FROM info_isoper")
@@ -1042,7 +1211,7 @@ def download_template():
     isoper_validation.error = "올바른 사용여부를 선택하세요."
     isoper_validation.errorTitle = "입력 오류"
     ws.add_data_validation(isoper_validation)
-    isoper_validation.add(f"M2:M1000")
+    isoper_validation.add(f"N2:N1000")
 
     # 서비스구분 드롭다운
     oper_options = execute_query("SELECT state FROM info_oper")
@@ -1051,7 +1220,7 @@ def download_template():
     oper_validation.error = "올바른 서비스구분을 선택하세요."
     oper_validation.errorTitle = "입력 오류"
     ws.add_data_validation(oper_validation)
-    oper_validation.add(f"N2:N1000")
+    oper_validation.add(f"O2:O1000")
 
     # 전원이중화 드롭다운
     power_options = execute_query("SELECT state FROM info_power")
@@ -1060,7 +1229,7 @@ def download_template():
     power_validation.error = "올바른 전원이중화 옵션을 선택하세요."
     power_validation.errorTitle = "입력 오류"
     ws.add_data_validation(power_validation)
-    power_validation.add(f"O2:O1000")
+    power_validation.add(f"P2:P1000")
 
     # OS 드롭다운
     os_options = execute_query("SELECT state FROM info_os")
@@ -1069,16 +1238,7 @@ def download_template():
     os_validation.error = "올바른 OS를 선택하세요."
     os_validation.errorTitle = "입력 오류"
     ws.add_data_validation(os_validation)
-    os_validation.add(f"Q2:Q1000")
-
-    # 도메인 드롭다운
-    domain_options = execute_query("SELECT state FROM info_domain")
-    domain_list = ','.join([f'"{option["state"]}"' for option in domain_options])
-    domain_validation = DataValidation(type="list", formula1=f'"{domain_list}"', allow_blank=True)
-    domain_validation.error = "올바른 도메인을 선택하세요."
-    domain_validation.errorTitle = "입력 오류"
-    ws.add_data_validation(domain_validation)
-    domain_validation.add(f"V2:V1000")
+    os_validation.add(f"R2:R1000")
 
     # 안내 시트 추가
     guide_ws = wb.create_sheet(title="작성 가이드")
@@ -1088,10 +1248,9 @@ def download_template():
 
     guide_rows = [
         ["* 표시된 항목은 필수 입력 항목입니다."],
-        ["VM여부는 '예' 또는 '아니오'로 입력해주세요."],
         ["날짜는 YYYY-MM-DD 형식으로 입력해주세요. (예: 2023-01-01)"],
         ["드롭다운 목록에서 선택 가능한 항목만 입력해주세요."],
-        ["상위자산은 VM이 '예'인 경우에만 입력하며, 물리 서버의 자산번호를 입력해주세요."],
+        ["상위자산은 그룹이 '논리'인 경우에만 입력하며, 물리 서버의 자산번호를 입력해주세요."],
         [""],
         ["각 필드 설명:"],
         ["서버명", "서버의 이름을 입력합니다."],
@@ -1101,7 +1260,8 @@ def download_template():
         ["센터", "서버가 위치한 센터를 입력합니다."],
         ["상면번호", "서버의 상면 번호를 입력합니다. (예: 1F-R01-01)"],
         ["상단번호", "서버의 상단 번호를 입력합니다."],
-        ["VM여부", "가상 머신 여부를 '예' 또는 '아니오'로 선택합니다."],
+        ["도메인", "드롭다운에서 도메인을 선택합니다. (서버, 스위치, 스토리지, 어플라이언스)"],
+        ["그룹", "드롭다운에서 그룹을 선택합니다. (물리, 논리, L2, L3 등)"],
         ["설치일자", "서버 설치 일자를 YYYY-MM-DD 형식으로 입력합니다."],
         ["폐기일자", "서버 폐기 일자를 YYYY-MM-DD 형식으로 입력합니다."],
         ["담당자(정)", "주 담당자 이름을 입력합니다."],
@@ -1115,12 +1275,11 @@ def download_template():
         ["제조사", "서버 제조사를 입력합니다."],
         ["모델", "서버 모델명을 입력합니다."],
         ["시리얼넘버", "서버 시리얼 번호를 입력합니다."],
-        ["도메인", "드롭다운에서 도메인을 선택합니다."],
         ["현업담당자", "현업 담당자 이름을 입력합니다."],
         ["장비크기(U)", "서버 장비 크기를 U 단위로 입력합니다."],
         ["물리코어", "서버의 물리 코어 수를 입력합니다."],
         ["메모리(GB)", "서버의 메모리 크기를 GB 단위로 입력합니다."],
-        ["상위자산", "VM인 경우 상위 물리 서버의 자산 번호를 입력합니다."]
+        ["상위자산", "논리 자산인 경우 상위 물리 서버의 자산 번호를 입력합니다."]
     ]
 
     for row_idx, row_data in enumerate(guide_rows, 2):
@@ -1176,9 +1335,9 @@ def bulk_upload():
         headers = [cell.value for cell in ws[1]]
         expected_headers = [
             '서버명*', 'IP 주소*', '호스트 이름', 'ITAM자산번호', '센터', '상면번호', '상단번호',
-            'VM여부*', '설치일자', '폐기일자', '담당자(정)', '담당자(부)', '사용여부*',
+            '도메인*', '그룹*', '설치일자', '폐기일자', '담당자(정)', '담당자(부)', '사용여부*',
             '서비스구분*', '전원이중화', 'PDU', 'OS*', 'OS버전', '제조사', '모델',
-            '시리얼넘버', '도메인*', '현업담당자', '장비크기(U)', '물리코어', '메모리(GB)', '상위자산'
+            '시리얼넘버', '현업담당자', '장비크기(U)', '물리코어', '메모리(GB)', '상위자산'
         ]
 
         if headers != expected_headers:
@@ -1202,15 +1361,28 @@ def bulk_upload():
             if not row[1]:  # IP 주소
                 errors.append({'row': row_idx, 'column': 'IP 주소*', 'message': 'IP 주소는 필수 입력 항목입니다.'})
 
-            # VM여부 검증
-            vm_value = row[7]
-            if not vm_value:
-                errors.append({'row': row_idx, 'column': 'VM여부*', 'message': 'VM여부는 필수 입력 항목입니다.'})
-            elif vm_value not in ['예', '아니오']:
-                errors.append({'row': row_idx, 'column': 'VM여부*', 'message': 'VM여부는 "예" 또는 "아니오"만 가능합니다.'})
+            # 도메인 검증
+            domain_value = row[7]
+            if not domain_value:
+                errors.append({'row': row_idx, 'column': '도메인*', 'message': '도메인은 필수 입력 항목입니다.'})
+            else:
+                domain_options = [option['state'] for option in execute_query("SELECT state FROM info_domain")]
+                if domain_value not in domain_options:
+                    errors.append(
+                        {'row': row_idx, 'column': '도메인*', 'message': f'도메인은 {", ".join(domain_options)} 중 하나여야 합니다.'})
+
+            # 그룹 검증
+            group_value = row[8]
+            if not group_value:
+                errors.append({'row': row_idx, 'column': '그룹*', 'message': '그룹은 필수 입력 항목입니다.'})
+            else:
+                group_options = [option['state'] for option in execute_query("SELECT DISTINCT state FROM info_group")]
+                if group_value not in group_options:
+                    errors.append({'row': row_idx, 'column': '그룹*',
+                                   'message': f'그룹은 {", ".join(group_options)} 중 하나여야 합니다.'})
 
             # 사용여부 검증
-            isoper_value = row[12]
+            isoper_value = row[13]
             if not isoper_value:
                 errors.append({'row': row_idx, 'column': '사용여부*', 'message': '사용여부는 필수 입력 항목입니다.'})
             else:
@@ -1220,7 +1392,7 @@ def bulk_upload():
                                    'message': f'사용여부는 {", ".join(isoper_options)} 중 하나여야 합니다.'})
 
             # 서비스구분 검증
-            oper_value = row[13]
+            oper_value = row[14]
             if not oper_value:
                 errors.append({'row': row_idx, 'column': '서비스구분*', 'message': '서비스구분은 필수 입력 항목입니다.'})
             else:
@@ -1230,7 +1402,7 @@ def bulk_upload():
                                    'message': f'서비스구분은 {", ".join(oper_options)} 중 하나여야 합니다.'})
 
             # OS 검증
-            os_value = row[16]
+            os_value = row[17]
             if not os_value:
                 errors.append({'row': row_idx, 'column': 'OS*', 'message': 'OS는 필수 입력 항목입니다.'})
             else:
@@ -1239,18 +1411,8 @@ def bulk_upload():
                     errors.append(
                         {'row': row_idx, 'column': 'OS*', 'message': f'OS는 {", ".join(os_options)} 중 하나여야 합니다.'})
 
-            # 도메인 검증
-            domain_value = row[21]
-            if not domain_value:
-                errors.append({'row': row_idx, 'column': '도메인*', 'message': '도메인은 필수 입력 항목입니다.'})
-            else:
-                domain_options = [option['state'] for option in execute_query("SELECT state FROM info_domain")]
-                if domain_value not in domain_options:
-                    errors.append(
-                        {'row': row_idx, 'column': '도메인*', 'message': f'도메인은 {", ".join(domain_options)} 중 하나여야 합니다.'})
-
             # 전원이중화 검증 (필수는 아님)
-            power_value = row[14]
+            power_value = row[15]
             if power_value:
                 power_options = [option['state'] for option in execute_query("SELECT state FROM info_power")]
                 if power_value not in power_options:
@@ -1258,7 +1420,7 @@ def bulk_upload():
                                    'message': f'전원이중화는 {", ".join(power_options)} 중 하나여야 합니다.'})
 
             # 날짜 형식 검증
-            datein = row[8]
+            datein = row[9]
             if datein:
                 try:
                     if isinstance(datein, str):
@@ -1267,7 +1429,7 @@ def bulk_upload():
                 except ValueError:
                     errors.append({'row': row_idx, 'column': '설치일자', 'message': '설치일자는 YYYY-MM-DD 형식이어야 합니다.'})
 
-            dateout = row[9]
+            dateout = row[10]
             if dateout:
                 try:
                     if isinstance(dateout, str):
@@ -1275,12 +1437,12 @@ def bulk_upload():
                 except ValueError:
                     errors.append({'row': row_idx, 'column': '폐기일자', 'message': '폐기일자는 YYYY-MM-DD 형식이어야 합니다.'})
 
-            # 상위자산 검증 (VM이 '예'인 경우에만)
-            if vm_value == '예':
+            # 상위자산 검증 (그룹이 '논리'인 경우에만)
+            if group_value == '논리':
                 vcenter = row[26]  # 상위자산
                 if vcenter:
                     # 상위자산이 존재하는지 확인
-                    sql = "SELECT COUNT(*) as count FROM total_asset WHERE pnum = %s AND isvm = 0"
+                    sql = "SELECT COUNT(*) as count FROM total_asset WHERE pnum = %s AND `group` = 0"
                     result = execute_query(sql, (vcenter,), fetch_all=False)
                     if result['count'] == 0:
                         errors.append(
@@ -1295,26 +1457,26 @@ def bulk_upload():
                 'center': row[4],
                 'loc1': row[5],
                 'loc2': row[6],
-                'isvm': 1 if row[7] == '예' else 0,
-                'datein': row[8],
-                'dateout': row[9],
-                'charge': row[10],
-                'charge2': row[11],
-                'isoper': row[12],
-                'oper': row[13],
-                'power': row[14],
-                'pdu': row[15],
-                'os': row[16],
-                'osver': row[17],
-                'maker': row[18],
-                'model': row[19],
-                'serial': row[20],
-                'domain': row[21],
+                'domain': row[7],
+                'group': row[8],
+                'datein': row[9],
+                'dateout': row[10],
+                'charge': row[11],
+                'charge2': row[12],
+                'isoper': row[13],
+                'oper': row[14],
+                'power': row[15],
+                'pdu': row[16],
+                'os': row[17],
+                'osver': row[18],
+                'maker': row[19],
+                'model': row[20],
+                'serial': row[21],
                 'charge3': row[22],
                 'usize': row[23],
                 'cpucore': row[24],
                 'memory': row[25],
-                'vcenter': row[26] if row[7] == '예' else None
+                'vcenter': row[26] if row[8] == '논리' else None
             })
 
         # 오류가 있으면 처리 중단
@@ -1332,6 +1494,17 @@ def bulk_upload():
             with db.cursor() as cursor:
                 for item in data:
                     # 코드값 조회
+                    # domain
+                    cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (item['domain'],))
+                    domain_value = cursor.fetchone()
+                    domain = domain_value['domain'] if domain_value else 0
+
+                    # group
+                    cursor.execute("SELECT `group` FROM info_group WHERE state = %s AND domain = %s",
+                                   (item['group'], domain))
+                    group_value = cursor.fetchone()
+                    group = group_value['group'] if group_value else 0
+
                     # isoper
                     cursor.execute("SELECT isoper FROM info_isoper WHERE state = %s", (item['isoper'],))
                     isoper_value = cursor.fetchone()
@@ -1353,11 +1526,6 @@ def bulk_upload():
                     cursor.execute("SELECT os FROM info_os WHERE state = %s", (item['os'],))
                     os_value = cursor.fetchone()
                     os_code = os_value['os'] if os_value else 0
-
-                    # domain
-                    cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (item['domain'],))
-                    domain_value = cursor.fetchone()
-                    domain = domain_value['domain'] if domain_value else 0
 
                     # 날짜 처리
                     datein = item['datein']
@@ -1384,7 +1552,7 @@ def bulk_upload():
 
                     # SQL 쿼리
                     sql = """INSERT INTO total_asset (
-                        itamnum, servername, ip, hostname, center, loc1, loc2, isvm, vcenter, 
+                        itamnum, servername, ip, hostname, center, loc1, loc2, `group`, vcenter, 
                         datein, dateout, charge, charge2, isoper, oper, power, pdu, os, osver, 
                         maker, model, serial, domain, charge3, usize, cpucore, memory, 
                         isfix, dateinsert, dateupdate
@@ -1395,7 +1563,7 @@ def bulk_upload():
 
                     cursor.execute(sql, (
                         item['itamnum'], item['servername'], item['ip'], item['hostname'],
-                        item['center'], item['loc1'], loc2, item['isvm'], vcenter,
+                        item['center'], item['loc1'], loc2, group, vcenter,
                         datein, dateout, item['charge'], item['charge2'],
                         isoper, oper, power, item['pdu'], os_code, item['osver'],
                         item['maker'], item['model'], item['serial'], domain, item['charge3'],
@@ -1424,8 +1592,8 @@ def bulk_upload():
             'message': f'{inserted_count}개의 자산이 성공적으로 등록되었습니다.',
             'details': {
                 '총 등록 자산': inserted_count,
-                '물리 서버': sum(1 for item in data if item['isvm'] == 0),
-                '가상 서버': sum(1 for item in data if item['isvm'] == 1)
+                '물리 서버': sum(1 for item in data if item['group'] == '물리'),
+                '논리 서버': sum(1 for item in data if item['group'] == '논리')
             }
         })
 

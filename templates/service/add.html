@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3">서비스 추가</h1>
+        <a href="{{ url_for('service.index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> 목록으로 돌아가기
+        </a>
+    </div>
+
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">서비스 정보</h6>
+        </div>
+        <div class="card-body">
+            <form method="post" action="{{ url_for('service.add_service') }}">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_servicecode">서비스 코드 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="app_servicecode" name="app_servicecode" required>
+                            <small class="form-text text-muted">필수 입력 항목입니다.</small>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_name">서비스명 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="app_name" name="app_name" required>
+                            <small class="form-text text-muted">필수 입력 항목입니다.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_group">서비스 구분</label>
+                            <input type="text" class="form-control" id="app_group" name="app_group">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_domain">서비스 도메인</label>
+                            <input type="text" class="form-control" id="app_domain" name="app_domain">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_appcode">APP 코드</label>
+                            <input type="text" class="form-control" id="app_appcode" name="app_appcode">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-center mt-4">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> 저장
+                    </button>
+                    <a href="{{ url_for('service.index') }}" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> 취소
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

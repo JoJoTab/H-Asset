@@ -22,12 +22,14 @@ from blueprints.storage import storage_bp
 from blueprints.rack import rack_bp
 from blueprints.file import file_bp
 from blueprints.trend import trend_bp
+from blueprints.service import service_bp
 from utils.db import init_db_pool, close_db_pool
 from utils.auto_register import setup_auto_register
 from utils.auto_storage import setup_auto_storage
 
 app = Flask(__name__)
 app.config.from_object(Config)
+app.secret_key = 'your_secret_key_here'  # 세션을 위한 시크릿 키 설정
 
 # 블루프린트 등록
 app.register_blueprint(asset_bp)
@@ -35,6 +37,7 @@ app.register_blueprint(storage_bp)
 app.register_blueprint(rack_bp)
 app.register_blueprint(file_bp)
 app.register_blueprint(trend_bp)
+app.register_blueprint(service_bp, url_prefix='/service')
 
 # 자동 등록 기능 설정
 setup_auto_register()

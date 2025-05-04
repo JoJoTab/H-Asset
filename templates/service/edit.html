@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3">서비스 수정 - {{ service.app_name }}</h1>
+        <a href="{{ url_for('service.index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> 목록으로 돌아가기
+        </a>
+    </div>
+
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">서비스 정보</h6>
+        </div>
+        <div class="card-body">
+            <form method="post" action="{{ url_for('service.edit_service', app_idx=service.app_idx) }}">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_servicecode">서비스 코드 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="app_servicecode" name="app_servicecode" value="{{ service.app_servicecode }}" required>
+                            <small class="form-text text-muted">필수 입력 항목입니다.</small>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_name">서비스명 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="app_name" name="app_name" value="{{ service.app_name }}" required>
+                            <small class="form-text text-muted">필수 입력 항목입니다.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_group">서비스 구분</label>
+                            <input type="text" class="form-control" id="app_group" name="app_group" value="{{ service.app_group }}">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_domain">서비스 도메인</label>
+                            <input type="text" class="form-control" id="app_domain" name="app_domain" value="{{ service.app_domain }}">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="app_appcode">APP 코드</label>
+                            <input type="text" class="form-control" id="app_appcode" name="app_appcode" value="{{ service.app_appcode }}">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-center mt-4">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> 저장
+                    </button>
+                    <a href="{{ url_for('service.index') }}" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> 취소
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 연계 자산 관리 섹션 -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+            <h6 class="m-0 font-weight-bold text-primary">연계 자산</h6>
+            <button id="linkAssetsBtn" class="btn btn-sm btn-success">
+                <i class="fas fa-link"></i> 연계 자산 추가
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="linkedAssetsTable" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>자산 고유번호</th>
+                            <th>서버명</th>
+                            <th>IP 주소</th>
+                            <th>호스트 이름</th>
+                            <th>도메인</th>
+                            <th>사용여부</th>
+                            <th>액션</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for asset in linked_assets %}
+                        <tr class="asset-row" data-pnum="{{ asset.pnum }}">
+                            <td>{{ asset.pnum }}</td>
+                            <td>{{ asset.servername }}</td>
+                            <td>{{ asset.ip }}</td>
+                            <td>{{ asset.hostname }}</td>
+                            <td>{{ asset.domain_state }}</td>
+                            <td>{{ asset.isoper_state }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger unlink-asset" data-pnum="{{ asset.pnum }}">
+                                    <i class="fas fa-unlink"></i> 연계 해제
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 연계 자산 추가 모달 -->
+<div class="modal fade" id="linkAssetsModal" tabindex="-1" role="dialog" aria-labelledby="linkAssetsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="linkAssetsModalLabel">연계 자산 추가</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="assetSearch">자산 검색</label>
+                    <input type="text" class="form-control" id="assetSearch" placeholder="서버명, IP, 호스트명으로 검색">
+                </div>
+
+                <div class="search-results mt-3">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="searchResultsTable" width="100%" cellspacing="0">
+                            <thead>
+                                <tr>
+                                    <th style="width: 50px;">선택</th>
+                                    <th>자산번호</th>
+                                    <th>서버명</th>
+                                    <th>IP 주소</th>
+                                    <th>호스트 이름</th>
+                                    <th>도메인</th>
+                                </tr>
+                            </thead>
+                            <tbody id="searchResults">
+                                <!-- 검색 결과가 여기에 동적으로 추가됩니다 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                <button type="button" id="saveLinkedAssets" class="btn btn-primary">연계 추가</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    // DataTable 초기화
+    var linkedAssetsTable = $('#linkedAssetsTable').DataTable({
+        language: {
+            url: '/static/js/korean.json'
+        },
+        order: [[0, 'asc']]
+    });
+
+    // 더블 클릭시 자산 상세 페이지로 이동
+    $(document).on('dblclick', '.asset-row', function() {
+        var pnum = $(this).data('pnum');
+        window.location.href = "{{ url_for('asset.edit_asset', pnum=0) }}".replace('0', pnum);
+    });
+
+    // 연계 자산 추가 버튼 클릭
+    $('#linkAssetsBtn').click(function() {
+        // 검색 폼 초기화
+        $('#assetSearch').val('');
+        $('#searchResults').empty();
+        $('#linkAssetsModal').modal('show');
+    });
+
+    // 자산 검색
+    var searchTimeout;
+    $('#assetSearch').keyup(function() {
+        clearTimeout(searchTimeout);
+
+        var searchTerm = $(this).val().trim();
+        if (searchTerm.length < 2) return;
+
+        searchTimeout = setTimeout(function() {
+            $.ajax({
+                url: "{{ url_for('service.search_assets') }}",
+                data: { term: searchTerm },
+                success: function(data) {
+                    $('#searchResults').empty();
+
+                    if (data.length === 0) {
+                        $('#searchResults').append('<tr><td colspan="6" class="text-center">검색 결과가 없습니다.</td></tr>');
+                        return;
+                    }
+
+                    $.each(data, function(i, asset) {
+                        var row = `
+                            <tr>
+                                <td class="text-center">
+                                    <input type="checkbox" class="asset-checkbox" data-pnum="${asset.pnum}">
+                                </td>
+                                <td>${asset.pnum}</td>
+                                <td>${asset.servername || ''}</td>
+                                <td>${asset.ip || ''}</td>
+                                <td>${asset.hostname || ''}</td>
+                                <td>${asset.domain_state || ''}</td>
+                            </tr>
+                        `;
+                        $('#searchResults').append(row);
+                    });
+                }
+            });
+        }, 500);
+    });
+
+    // 연계 자산 저장
+    $('#saveLinkedAssets').click(function() {
+        var selectedAssets = [];
+
+        $('.asset-checkbox:checked').each(function() {
+            selectedAssets.push($(this).data('pnum'));
+        });
+
+        if (selectedAssets.length === 0) {
+            alert('선택된 자산이 없습니다.');
+            return;
+        }
+
+        $.ajax({
+            url: "{{ url_for('service.link_assets') }}",
+            method: 'POST',
+            data: {
+                app_idx: {{ service.app_idx }},
+                asset_pnums: selectedAssets
+            },
+            success: function(response) {
+                if (response.success) {
+                    alert(response.message);
+                    $('#linkAssetsModal').modal('hide');
+                    location.reload(); // 페이지 새로고침
+                } else {
+                    alert('오류가 발생했습니다: ' + response.message);
+                }
+            },
+            error: function() {
+                alert('서버 오류가 발생했습니다.');
+            }
+        });
+    });
+
+    // 연계 해제
+    $(document).on('click', '.unlink-asset', function() {
+        if (!confirm('이 자산의 연계를 해제하시겠습니까?')) return;
+
+        var pnum = $(this).data('pnum');
+
+        $.ajax({
+            url: "{{ url_for('service.unlink_asset') }}",
+            method: 'POST',
+            data: {
+                app_idx: {{ service.app_idx }},
+                pnum: pnum
+            },
+            success: function(response) {
+                if (response.success) {
+                    alert(response.message);
+                    location.reload(); // 페이지 새로고침
+                } else {
+                    alert('오류가 발생했습니다: ' + response.message);
+                }
+            },
+            error: function() {
+                alert('서버 오류가 발생했습니다.');
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

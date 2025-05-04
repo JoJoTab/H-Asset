@@ -12,7 +12,7 @@ rack_bp = Blueprint('rack', __name__)
 @cache('racklayout')
 def racklayout():
     """랙 레이아웃 페이지"""
-    sql = "SELECT loc1 FROM total_asset WHERE isvm = 0"
+    sql = "SELECT loc1 FROM total_asset WHERE `group` = 0"
     data = execute_query(sql)
 
     # 데이터프레임 변환

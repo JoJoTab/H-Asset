@@ -2,19 +2,25 @@
 
 {% block content %}
 <div class="container-fluid">
-    <h1 class="h3 mb-2 text-gray-800">서비스 관리</h1>
-    <p class="mb-4">서비스 목록을 관리하고 자산과 연계할 수 있습니다.</p>
-
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 d-flex justify-content-between align-items-center">
-            <h6 class="m-0 font-weight-bold text-primary">서비스 목록</h6>
-            <a href="{{ url_for('service.add_service') }}" class="btn btn-primary btn-sm">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0 text-gray-800">서비스 관리</h1>
+        <div>
+            <button class="btn btn-success mr-2" data-toggle="modal" data-target="#bulkUploadModal">
+                <i class="fas fa-file-excel"></i> 일괄 추가/연계
+            </button>
+            <a href="{{ url_for('service.add_service') }}" class="btn btn-primary">
                 <i class="fas fa-plus"></i> 서비스 추가
             </a>
         </div>
+    </div>
+
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">서비스 목록</h6>
+        </div>
         <div class="card-body">
             <div class="table-responsive">
-                <table class="table table-bordered" id="servicesTable" width="100%" cellspacing="0">
+                <table class="table table-bordered" id="serviceTable" width="100%" cellspacing="0">
                     <thead>
                         <tr>
                             <th>서비스 코드</th>
@@ -27,7 +33,7 @@
                     </thead>
                     <tbody>
                         {% for service in services %}
-                        <tr class="service-row" data-id="{{ service.app_idx }}">
+                        <tr class="service-row" data-app-idx="{{ service.app_idx }}">
                             <td>{{ service.app_servicecode }}</td>
                             <td>{{ service.app_name }}</td>
                             <td>{{ service.app_group }}</td>
@@ -37,12 +43,17 @@
                                 <a href="{{ url_for('service.edit_service', app_idx=service.app_idx) }}" class="btn btn-info btn-sm">
                                     <i class="fas fa-edit"></i> 수정
                                 </a>
-                                <button class="btn btn-danger btn-sm delete-service" data-id="{{ service.app_idx }}" data-name="{{ service.app_name }}">
+                                <button class="btn btn-danger btn-sm delete-service" data-app-idx="{{ service.app_idx }}">
                                     <i class="fas fa-trash"></i> 삭제
                                 </button>
                             </td>
                         </tr>
                         {% endfor %}
+                        {% if not services %}
+                        <tr>
+                            <td colspan="6" class="text-center">등록된 서비스가 없습니다.</td>
+                        </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
@@ -51,24 +62,83 @@
 </div>
 
 <!-- 삭제 확인 모달 -->
-<div class="modal fade" id="deleteModal" tabindex="-1" role="dialog" aria-labelledby="deleteModalLabel" aria-hidden="true">
+<div class="modal fade" id="deleteServiceModal" tabindex="-1" role="dialog" aria-labelledby="deleteServiceModalLabel" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="deleteModalLabel">서비스 삭제 확인</h5>
+                <h5 class="modal-title" id="deleteServiceModalLabel">서비스 삭제 확인</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                 </button>
             </div>
             <div class="modal-body">
-                <p>정말로 <span id="serviceName"></span> 서비스를 삭제하시겠습니까?</p>
-                <p class="text-danger">이 작업은 되돌릴 수 없으며, 모든 자산 연계 정보도 함께 삭제됩니다.</p>
+                정말로 이 서비스를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
-                <form id="deleteForm" method="POST">
+                <form id="deleteServiceForm" method="POST">
                     <button type="submit" class="btn btn-danger">삭제</button>
                 </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 일괄 업로드 모달 -->
+<div class="modal fade" id="bulkUploadModal" tabindex="-1" role="dialog" aria-labelledby="bulkUploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkUploadModalLabel">서비스 일괄 추가/연계</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs" id="bulkUploadTabs" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="service-tab" data-toggle="tab" href="#service-upload" role="tab" aria-controls="service-upload" aria-selected="true">서비스 일괄 추가</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="link-tab" data-toggle="tab" href="#link-upload" role="tab" aria-controls="link-upload" aria-selected="false">서비스-자산 일괄 연계</a>
+                    </li>
+                </ul>
+                <div class="tab-content mt-3" id="bulkUploadTabContent">
+                    <!-- 서비스 일괄 추가 탭 -->
+                    <div class="tab-pane fade show active" id="service-upload" role="tabpanel" aria-labelledby="service-tab">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> 서비스 일괄 추가를 위한 엑셀 파일을 업로드하세요.
+                            <a href="{{ url_for('service.download_service_template') }}" class="alert-link">템플릿 다운로드</a>
+                        </div>
+                        <form action="{{ url_for('service.upload_services') }}" method="POST" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="serviceFile">엑셀 파일 선택</label>
+                                <input type="file" class="form-control-file" id="serviceFile" name="file" accept=".xlsx, .xls">
+                                <small class="form-text text-muted">Excel 파일만 업로드 가능합니다 (.xlsx, .xls)</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">업로드 및 처리</button>
+                        </form>
+                    </div>
+
+                    <!-- 서비스-자산 일괄 연계 탭 -->
+                    <div class="tab-pane fade" id="link-upload" role="tabpanel" aria-labelledby="link-tab">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> 서비스와 자산을 일괄 연계하기 위한 엑셀 파일을 업로드하세요.
+                            <a href="{{ url_for('service.download_link_template') }}" class="alert-link">템플릿 다운로드</a>
+                        </div>
+                        <form action="{{ url_for('service.upload_links') }}" method="POST" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="linkFile">엑셀 파일 선택</label>
+                                <input type="file" class="form-control-file" id="linkFile" name="file" accept=".xlsx, .xls">
+                                <small class="form-text text-muted">Excel 파일만 업로드 가능합니다 (.xlsx, .xls)</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">업로드 및 처리</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
             </div>
         </div>
     </div>
@@ -77,7 +147,7 @@
 <script>
 $(document).ready(function() {
     // DataTable 초기화
-    $('#servicesTable').DataTable({
+    $('#serviceTable').DataTable({
         language: {
             url: '/static/js/korean.json'
         },
@@ -86,20 +156,16 @@ $(document).ready(function() {
 
     // 서비스 행 더블 클릭 이벤트
     $(document).on('dblclick', '.service-row', function() {
-        var appIdx = $(this).data('id');
+        var appIdx = $(this).data('app-idx');
         window.location.href = "{{ url_for('service.edit_service', app_idx=0) }}".replace('0', appIdx);
     });
 
     // 삭제 버튼 클릭 이벤트
     $('.delete-service').on('click', function(e) {
-        e.stopPropagation();  // 행 더블클릭 이벤트 방지
-
-        var appIdx = $(this).data('id');
-        var serviceName = $(this).data('name');
-
-        $('#serviceName').text(serviceName);
-        $('#deleteForm').attr('action', "{{ url_for('service.delete_service', app_idx=0) }}".replace('0', appIdx));
-        $('#deleteModal').modal('show');
+        e.stopPropagation(); // 행 더블클릭 이벤트 방지
+        var appIdx = $(this).data('app-idx');
+        $('#deleteServiceForm').attr('action', "{{ url_for('service.delete_service', app_idx=0) }}".replace('0', appIdx));
+        $('#deleteServiceModal').modal('show');
     });
 });
 </script>

@@ -1,21 +1,14 @@
 from flask import Flask, render_template, redirect, url_for, request, send_file, jsonify, session, flash
+from flask_ckeditor import CKEditor
 import pandas as pd
 import numpy as np
 import pymysql.cursors
-import os
-from datetime import datetime, timedelta
-from flask_wtf import FlaskForm
-from flask_wtf.file import FileField, FileRequired
 import openpyxl
 import plotly.express as px
-import asyncio
 import os
 from datetime import datetime, timedelta
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileRequired
-import aiofiles
-from flask_cors import CORS
-import redis
 from config import Config
 from blueprints.asset import asset_bp
 from blueprints.storage import storage_bp
@@ -28,8 +21,15 @@ from utils.auto_register import setup_auto_register
 from utils.auto_storage import setup_auto_storage
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key'
 app.config.from_object(Config)
 app.secret_key = 'your_secret_key_here'  # 세션을 위한 시크릿 키 설정
+
+# CKEditor 초기화
+ckeditor = CKEditor(app)
+app.config['CKEDITOR_SERVE_LOCAL'] = True
+app.config['CKEDITOR_HEIGHT'] = 400
+app.config['CKEDITOR_FILE_UPLOADER'] = 'service.upload_image'  # 이미지 업로드 라우트
 
 # 블루프린트 등록
 app.register_blueprint(asset_bp)
@@ -54,7 +54,6 @@ def setup():
 def teardown(exception):
     # 비동기 함수를 동기 함수로 변경
     close_db_pool()
-    print("애플리케이션 종료 완료")
 
 @app.route('/')
 @app.route('/index')
@@ -1557,3 +1556,4 @@ def delete_asset(pnum):
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
+

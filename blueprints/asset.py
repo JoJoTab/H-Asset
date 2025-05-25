@@ -26,7 +26,7 @@ def index():
     # 그래프 데이터 가져오기
     graphs = generate_asset_graph()
 
-    # 자산 데이터 가져오기 (isfix=1 또는 isfix=2)
+    # 자산 데이터 가져오기 (모든 자산을 확인 완료 상태로 처리)
     sql = """
         SELECT ta.*, 
                id.state AS domain_state, 
@@ -42,10 +42,13 @@ def index():
         LEFT JOIN info_power io_power ON ta.power = io_power.power
         LEFT JOIN info_os io_os ON ta.os = io_os.os
         LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
-        WHERE ta.isfix IN (1, 2)
-        ORDER BY ta.isfix DESC, ta.dateupdate DESC
+        ORDER BY ta.dateupdate DESC
     """
     data = execute_query(sql)
+
+    # 모든 자산의 isfix 값을 0(확인 완료)으로 업데이트
+    update_sql = "UPDATE total_asset SET isfix = 0 WHERE isfix != 0"
+    execute_query(update_sql, fetch_all=False)
 
     return render_template('index.html', data_card=data_card, data=data, graphs=graphs)
 
@@ -175,7 +178,6 @@ def generate_asset_graph():
                 LEFT JOIN hli_asset.info_os io_os ON ta.os = io_os.os
                 LEFT JOIN hli_asset.info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
                 WHERE ta.isfix = 0 AND io_isoper.state = '사용'
-                ORDER BY ta.dateinsert
                 """
 
     # 데이터 가져오기
@@ -196,9 +198,6 @@ def generate_asset_graph():
     # 최근 1년 기간 설정
     one_year_ago = pd.Timestamp.now() - pd.DateOffset(years=1)
 
-    # 모든 자산에 월 정보 추가
-    df_graph['month'] = df_graph['datein'].dt.to_period('M')
-
     # 1. 전체 자산의 최근 1년간 누적 그래프
     # 최근 1년간의 월 목록 생성
     recent_months = pd.period_range(start=one_year_ago, end=pd.Timestamp.now(), freq='M')
@@ -207,10 +206,18 @@ def generate_asset_graph():
     monthly_data = []
 
     for month in recent_months:
-        # 해당 월 이전에 도입되고 (폐기되지 않았거나 해당 월 이후에 폐기된) 자산 필터링
         month_end = month.to_timestamp(how='end')
-        valid_assets = df_graph[(df_graph['datein'] <= month_end) &
-                                ((df_graph['dateout'].isna()) | (df_graph['dateout'] > month_end))]
+
+        # 해당 월 이전에 설치된 모든 자산
+        installed_before = df_graph[df_graph['datein'] <= month_end]
+
+        # 해당 월 이전에 폐기된 모든 자산
+        discarded_before = installed_before[~installed_before['dateout'].isna() &
+                                            (installed_before['dateout'] <= month_end)]
+
+        # 해당 월 말 기준 유효 자산 (설치되었고 아직 폐기되지 않은 자산)
+        valid_assets = installed_before[installed_before['dateout'].isna() |
+                                        (installed_before['dateout'] > month_end)]
 
         # 도메인별 자산 수 계산
         domain_counts = valid_assets['domain_state'].value_counts()
@@ -247,17 +254,27 @@ def generate_asset_graph():
             yaxis_title='개수'
         )
 
-    # 2. 최근 1년간 설치/폐기 막대 그래프
-    df_recent = df_graph[df_graph['datein'] >= one_year_ago]
-    df_recent['month'] = df_recent['datein'].dt.to_period('M').astype(str)
-    monthly_data = df_recent.groupby('month').agg(
-        installed=('pnum', 'count'),  # 설치된 자산 수
-        discarded=('dateout', lambda x: x.notnull().sum())  # 폐기된 자산 수
-    ).reset_index()
+    # 2. 최근 1년간 설치/폐기 막대 그래프 (누적하지 않음)
+    # 설치 데이터: 최근 1년 내 설치된 자산
+    installed_df = df_graph[df_graph['datein'] >= one_year_ago].copy()
+    installed_df['month'] = installed_df['datein'].dt.strftime('%Y-%m')
+    installed_counts = installed_df.groupby('month').size().reset_index(name='installed')
+
+    # 폐기 데이터: 최근 1년 내 폐기된 자산
+    discarded_df = df_graph[(~df_graph['dateout'].isna()) & (df_graph['dateout'] >= one_year_ago)].copy()
+    discarded_df['month'] = discarded_df['dateout'].dt.strftime('%Y-%m')
+    discarded_counts = discarded_df.groupby('month').size().reset_index(name='discarded')
+
+    # 모든 월 목록 생성
+    all_months = pd.DataFrame({'month': [m.strftime('%Y-%m') for m in recent_months]})
+
+    # 설치 및 폐기 데이터 병합
+    monthly_changes = all_months.merge(installed_counts, on='month', how='left').fillna(0)
+    monthly_changes = monthly_changes.merge(discarded_counts, on='month', how='left').fillna(0)
 
     # wide-form에서 long-form으로 변환
-    monthly_data_long = pd.melt(
-        monthly_data,
+    monthly_changes_long = pd.melt(
+        monthly_changes,
         id_vars=['month'],
         value_vars=['installed', 'discarded'],
         var_name='category',
@@ -266,9 +283,9 @@ def generate_asset_graph():
 
     # 카테고리 이름 변경
     category_names = {'installed': '설치', 'discarded': '폐기'}
-    monthly_data_long['category'] = monthly_data_long['category'].map(category_names)
+    monthly_changes_long['category'] = monthly_changes_long['category'].map(category_names)
 
-    fig2 = px.bar(monthly_data_long, x='month', y='count', color='category',
+    fig2 = px.bar(monthly_changes_long, x='month', y='count', color='category',
                   title='최근 1년간 설치/폐기 자산',
                   labels={'count': '개수', 'month': '월', 'category': '구분'},
                   barmode='group',
@@ -286,7 +303,7 @@ def generate_asset_graph():
     domain_counts.columns = ['도메인', '개수']
 
     fig3 = px.pie(domain_counts, values='개수', names='도메인', title='도메인별 자산 분포')
-    fig3.update_traces(textposition='inside', textinfo='percent+label')
+    fig3.update_traces(textposition='inside', textinfo='percent+label+value')
 
     # 4. 서버 도메인의 OS별 원형 그래프
     server_df = df_graph[df_graph['domain_state'] == '서버']
@@ -294,7 +311,7 @@ def generate_asset_graph():
     os_counts.columns = ['OS', '개수']
 
     fig4 = px.pie(os_counts, values='개수', names='OS', title='서버 OS별 분포')
-    fig4.update_traces(textposition='inside', textinfo='percent+label')
+    fig4.update_traces(textposition='inside', textinfo='percent+label+value')
 
     # HTML로 그래프 렌더링
     graph1 = fig1.to_html(full_html=False, include_plotlyjs=False)
@@ -313,7 +330,21 @@ def generate_asset_graph():
 @asset_bp.route('/index_detail', methods=['GET', 'POST'])
 def index_detail():
     """자산 상세 검색 페이지"""
-    selected_columns = request.form.getlist('columns') if request.method == 'POST' else request.args.getlist('columns')
+    # 검색 옵션 및 열 선택 유지를 위한 처리
+    if request.method == 'POST':
+        # POST 요청에서 선택된 열 가져오기
+        selected_columns = request.form.getlist('columns')
+        # 검색 옵션을 세션에 저장
+        session['search_options'] = {k: v for k, v in request.form.items() if k != 'columns'}
+        session['selected_columns'] = selected_columns
+    else:
+        # GET 요청에서는 URL 파라미터 또는 세션에서 선택된 열 가져오기
+        url_columns = request.args.getlist('columns')
+        if url_columns:
+            selected_columns = url_columns
+            session['selected_columns'] = selected_columns
+        else:
+            selected_columns = session.get('selected_columns', [])
 
     # 기본 선택 열 설정 (아무것도 선택되지 않았을 경우)
     if not selected_columns:
@@ -336,6 +367,8 @@ def index_detail():
         'vcenter': '상위자산',
         'datein': '설치일자',
         'dateout': '폐기일자',
+        'eos': 'EOS 일자',
+        'eosl': 'EOSL 일자',
         'charge': '담당자(정)',
         'charge2': '담당자(부)',
         'isoper': '사용여부',
@@ -407,7 +440,7 @@ def index_detail():
     params = []
 
     # 기본적으로 isfix=0인 자산만 검색
-    if 'isfix' not in request.form and 'isfix' not in request.args:
+    if 'isfix' not in request.form and 'isfix' not in request.args and 'isfix' not in session.get('search_options', {}):
         sql += " AND ta.isfix = 0"
 
     # 계층 구조 필터링
@@ -422,33 +455,46 @@ def index_detail():
         sql += " AND ta.`group` = %s"
         params.append(group_filter)
 
+    # 검색 조건 처리
+    search_options = {}
+
     if request.method == 'POST':
+        # POST 요청에서 검색 조건 가져오기
+        search_options = {k: v for k, v in request.form.items() if k != 'columns'}
+    else:
+        # GET 요청에서는 세션에서 검색 조건 가져오기
+        search_options = session.get('search_options', {})
+
+    # 검색 조건 적용
+    if search_options:
         # 입력값 가져오기
-        itamnum = request.form.get('itamnum', None)
-        servername = request.form.get('servername', None)
-        ip = request.form.get('ip', None)
-        hostname = request.form.get('hostname', None)
-        center = request.form.get('center', None)
-        loc1 = request.form.get('loc1', None)
-        loc2 = request.form.get('loc2', None, type=int)
-        group = request.form.get('group', None, type=int)
-        vcenter = request.form.get('vcenter', None, type=int)
-        datein = request.form.get('datein', None)
-        dateout = request.form.get('dateout', None)
-        charge = request.form.get('charge', None)
-        charge2 = request.form.get('charge2', None)
-        isoper = request.form.get('isoper', None, type=int)
-        oper = request.form.get('oper', None, type=int)
-        power = request.form.get('power', None, type=int)
-        pdu = request.form.get('pdu', None)
-        os = request.form.get('os', None)
-        osver = request.form.get('osver', None)
-        maker = request.form.get('maker', None)
-        model = request.form.get('model', None)
-        serial = request.form.get('serial', None)
-        domain = request.form.get('domain', None)
-        charge3 = request.form.get('charge3', None)
-        isfix = request.form.get('isfix', None, type=int)
+        itamnum = search_options.get('itamnum', None)
+        servername = search_options.get('servername', None)
+        ip = search_options.get('ip', None)
+        hostname = search_options.get('hostname', None)
+        center = search_options.get('center', None)
+        loc1 = search_options.get('loc1', None)
+        loc2 = search_options.get('loc2', None)
+        group = search_options.get('group', None)
+        vcenter = search_options.get('vcenter', None)
+        datein = search_options.get('datein', None)
+        dateout = search_options.get('dateout', None)
+        eos = search_options.get('eos', None)
+        eosl = search_options.get('eosl', None)
+        charge = search_options.get('charge', None)
+        charge2 = search_options.get('charge2', None)
+        isoper = search_options.get('isoper', None)
+        oper = search_options.get('oper', None)
+        power = search_options.get('power', None)
+        pdu = search_options.get('pdu', None)
+        os = search_options.get('os', None)
+        osver = search_options.get('osver', None)
+        maker = search_options.get('maker', None)
+        model = search_options.get('model', None)
+        serial = search_options.get('serial', None)
+        domain = search_options.get('domain', None)
+        charge3 = search_options.get('charge3', None)
+        isfix = search_options.get('isfix', None)
 
         # 조건 추가
         if itamnum:
@@ -469,42 +515,72 @@ def index_detail():
         if loc1:
             sql += " AND ta.loc1 LIKE %s"
             params.append(f'%{loc1}%')
-        if loc2 is not None:
-            sql += " AND ta.loc2 = %s"
-            params.append(loc2)
-        if group is not None:
-            sql += " AND ta.`group` = %s"
-            params.append(group)
-        if vcenter is not None:
-            sql += " AND ta.vcenter = %s"
-            params.append(vcenter)
+        if loc2:
+            try:
+                loc2_int = int(loc2)
+                sql += " AND ta.loc2 = %s"
+                params.append(loc2_int)
+            except (ValueError, TypeError):
+                pass
+        if group:
+            try:
+                group_int = int(group)
+                sql += " AND ta.`group` = %s"
+                params.append(group_int)
+            except (ValueError, TypeError):
+                pass
+        if vcenter:
+            try:
+                vcenter_int = int(vcenter)
+                sql += " AND ta.vcenter = %s"
+                params.append(vcenter_int)
+            except (ValueError, TypeError):
+                pass
         if datein:
-            sql += " AND ta.datein LIKE %s"
-            params.append(f'%{datein}%')
+            sql += " AND ta.datein = %s"
+            params.append(datein)
         if dateout:
-            sql += " AND ta.dateout LIKE %s"
-            params.append(f'%{dateout}%')
+            sql += " AND ta.dateout = %s"
+            params.append(dateout)
+        if eos:
+            sql += " AND ta.eos = %s"
+            params.append(eos)
+        if eosl:
+            sql += " AND ta.eosl = %s"
+            params.append(eosl)
         if charge:
             sql += " AND ta.charge LIKE %s"
             params.append(f'%{charge}%')
         if charge2:
             sql += " AND ta.charge2 LIKE %s"
             params.append(f'%{charge2}%')
-        if isoper is not None:
-            sql += " AND ta.isoper = %s"
-            params.append(isoper)
-        if oper is not None:
-            sql += " AND ta.oper = %s"
-            params.append(oper)
-        if power is not None:
-            sql += " AND ta.power = %s"
-            params.append(power)
+        if isoper:
+            try:
+                isoper_int = int(isoper)
+                sql += " AND ta.isoper = %s"
+                params.append(isoper_int)
+            except (ValueError, TypeError):
+                pass
+        if oper:
+            try:
+                oper_int = int(oper)
+                sql += " AND ta.oper = %s"
+                params.append(oper_int)
+            except (ValueError, TypeError):
+                pass
+        if power:
+            try:
+                power_int = int(power)
+                sql += " AND ta.power = %s"
+                params.append(power_int)
+            except (ValueError, TypeError):
+                pass
         if pdu:
             sql += " AND ta.pdu LIKE %s"
             params.append(f'%{pdu}%')
         if os:
-            sql += " AND ta.os LIKE %s"
-            params.append(f'%{os}%')
+            sql += " AND io_os.state = %s"
+            params.append(os)
         if osver:
             sql += " AND ta.osver LIKE %s"
             params.append(f'%{osver}%')
@@ -518,18 +594,26 @@ def index_detail():
             sql += " AND ta.serial LIKE %s"
             params.append(f'%{serial}%')
         if domain:
-            sql += " AND ta.domain = %s"
-            params.append(domain)
+            try:
+                domain_int = int(domain)
+                sql += " AND ta.domain = %s"
+                params.append(domain_int)
+            except (ValueError, TypeError):
+                pass
         if charge3:
             sql += " AND ta.charge3 LIKE %s"
             params.append(f'%{charge3}%')
-        if isfix is not None:
-            sql += " AND ta.isfix = %s"
-            params.append(isfix)
+        if isfix:
+            try:
+                isfix_int = int(isfix)
+                sql += " AND ta.isfix = %s"
+                params.append(isfix_int)
+            except (ValueError, TypeError):
+                pass
 
     # 정렬 추가
-    sql += " ORDER BY ta.dateupdate DESC LIMIT 1000"  # 성능을 위해 결과 제한
-
+    sql += " ORDER BY ta.dateupdate DESC"  # 성능을 위해 결과 제한
+    print(sql,params)
     # 마지막 검색 쿼리와 파라미터를 세션에 저장 (내보내기용)
     session['last_search_query'] = sql
     session['last_search_params'] = params
@@ -556,7 +640,8 @@ def index_detail():
                            domain_options=domain_options,
                            group_options=group_options,
                            domain_filter=domain_filter,
-                           group_filter=group_filter)
+                           group_filter=group_filter,
+                           search_options=search_options)
 
 
 @asset_bp.route('/get_asset_details/<int:pnum>')
@@ -599,14 +684,16 @@ def get_asset_details(pnum):
 @asset_bp.route('/get_groups', methods=['GET'])
 def get_groups():
     """도메인에 따른 그룹 정보 가져오기"""
-    domain = request.args.get('domain', type=int)
+    domain = request.args.get('domain')
+    print(domain)
 
     if domain is None:
         return jsonify([])
 
     sql = "SELECT `group`, state FROM info_group WHERE domain = %s"
-    groups = execute_query(sql, (domain,))
 
+    groups = execute_query(sql, (domain,))
+    print(groups)
     return jsonify(groups)
 
 
@@ -660,9 +747,9 @@ def write_asset():
 def add_asset():
     """자산 추가 처리"""
     sql = """INSERT INTO total_asset (itamnum, servername, ip, hostname, center, loc1, loc2, `group`, vcenter, 
-            datein, dateout, charge, charge2, isoper, oper, power, pdu, os, osver, maker, model, serial, domain, 
+            datein, dateout, eos, eosl, charge, charge2, isoper, oper, power, pdu, os, osver, maker, model, serial, domain, 
             charge3, usize, cpucore, memory, isfix, dateupdate) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
             %s, %s, %s, %s, %s, %s)"""
 
     # 폼 데이터 가져오기
@@ -685,6 +772,8 @@ def add_asset():
 
     datein = request.form.get('datein')
     dateout = request.form.get('dateout')
+    eos = request.form.get('eos')
+    eosl = request.form.get('eosl')
     charge = request.form.get('charge')
     charge2 = request.form.get('charge2')
     isoper_state = request.form.get('isoper')
@@ -701,7 +790,7 @@ def add_asset():
     usize = request.form.get('usize', type=int, default=1)
     cpucore = request.form.get('cpucore', type=int)
     memory = request.form.get('memory', type=int)
-    isfix = 1  # 새로 추가된 자산은 기본적으로 정합성 확인이 필요
+    isfix = 0  # 새로 추가된 자산은 기본적으로 확인 완료 상태로 설정
     dateupdate = datetime.now()  # 현재 시간으로 업데이트 일자 설정
 
     # 날짜 형식 검사 및 변환
@@ -714,6 +803,16 @@ def add_asset():
         dateout = datetime.strptime(dateout, '%Y-%m-%d').date() if dateout else None
     except ValueError:
         dateout = None
+
+    try:
+        eos = datetime.strptime(eos, '%Y-%m-%d').date() if eos else None
+    except ValueError:
+        eos = None
+
+    try:
+        eosl = datetime.strptime(eosl, '%Y-%m-%d').date() if eosl else None
+    except ValueError:
+        eosl = None
 
     # 코드 값 조회
     db = get_db_connection()
@@ -746,7 +845,7 @@ def add_asset():
 
             # 데이터 삽입
             cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
-                                 group, vcenter, datein, dateout, charge, charge2,
+                                 group, vcenter, datein, dateout, eos, eosl, charge, charge2,
                                  isoper, oper, power, pdu, os_code, osver, maker, model, serial, domain, charge3,
                                  usize, cpucore, memory, isfix, dateupdate))
             db.commit()
@@ -767,7 +866,7 @@ def edit_asset(pnum):
     if request.method == 'POST':
         sql = """UPDATE total_asset SET itamnum = %s, servername = %s, ip = %s, 
                       hostname = %s, center = %s, loc1 = %s, loc2 = %s, `group` = %s, vcenter = %s,
-                      datein = %s, dateout = %s, charge = %s, charge2 = %s, 
+                      datein = %s, dateout = %s, eos = %s, eosl = %s, charge = %s, charge2 = %s, 
                       isoper = %s, oper = %s, power = %s, pdu = %s, os = %s, 
                       osver = %s, maker = %s, model = %s, serial = %s, domain = %s, charge3 = %s,
                       usize = %s, cpucore = %s, memory = %s, isfix = %s, dateupdate = %s
@@ -793,6 +892,8 @@ def edit_asset(pnum):
 
         datein = request.form.get('datein')
         dateout = request.form.get('dateout')
+        eos = request.form.get('eos')
+        eosl = request.form.get('eosl')
         charge = request.form.get('charge')
         charge2 = request.form.get('charge2')
         isoper_state = request.form.get('isoper')
@@ -809,7 +910,7 @@ def edit_asset(pnum):
         usize = request.form.get('usize', type=int, default=1)
         cpucore = request.form.get('cpucore', type=int)
         memory = request.form.get('memory', type=int)
-        isfix = 1  # 수정된 자산은 기본적으로 정합성 확인이 필요
+        isfix = 0  # 수정된 자산은 기본적으로 확인 완료 상태로 설정
         dateupdate = datetime.now()  # 현재 시간으로 업데이트 일자 설정
 
         # 날짜 형식 검사 및 변환
@@ -822,6 +923,16 @@ def edit_asset(pnum):
             dateout = datetime.strptime(dateout, '%Y-%m-%d').date() if dateout else None
         except ValueError:
             dateout = None
+
+        try:
+            eos = datetime.strptime(eos, '%Y-%m-%d').date() if eos else None
+        except ValueError:
+            eos = None
+
+        try:
+            eosl = datetime.strptime(eosl, '%Y-%m-%d').date() if eosl else None
+        except ValueError:
+            eosl = None
 
         # 코드 값 조회
         db = get_db_connection()
@@ -854,7 +965,7 @@ def edit_asset(pnum):
 
                 # 데이터 업데이트
                 cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
-                                     group, vcenter, datein, dateout, charge, charge2,
+                                     group, vcenter, datein, dateout, eos, eosl, charge, charge2,
                                      isoper, oper, power, pdu, os_code, osver, maker, model, serial, domain, charge3,
                                      usize, cpucore, memory, isfix, dateupdate, pnum))
                 db.commit()
@@ -959,7 +1070,7 @@ def export_asset():
         SELECT 
             ta.pnum, ta.itamnum, ta.servername, ta.ip, ta.hostname, ta.center, 
             ta.loc1, ta.loc2, ig.state AS group_state, ta.vcenter, ta.datein, ta.dateout, 
-            ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
+            ta.eos, ta.eosl, ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
             io_power.state AS power, ta.pdu, io_os.state AS os, ta.osver, 
             ta.maker, ta.model, ta.serial, io_domain.state AS domain, ta.charge3,
             ta.usize, ta.vmpnum, ta.dateinsert, ta.cpucore, ta.memory, ta.dateupdate, ta.isfix
@@ -990,6 +1101,8 @@ def export_asset():
         'vcenter': '상위 자산',
         'datein': '설치일자',
         'dateout': '폐기일자',
+        'eos': 'EOS 일자',
+        'eosl': 'EOSL 일자',
         'charge': '담당자(정)',
         'charge2': '담당자(부)',
         'isoper': '사용여부',
@@ -1054,7 +1167,7 @@ def export_filtered_asset():
             SELECT 
                 ta.pnum, ta.itamnum, ta.servername, ta.ip, ta.hostname, ta.center, 
                 ta.loc1, ta.loc2, ig.state AS group_state, ta.vcenter, ta.datein, ta.dateout, 
-                ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
+                ta.eos, ta.eosl, ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
                 io_power.state AS power, ta.pdu, io_os.state AS os, ta.osver, 
                 ta.maker, ta.model, ta.serial, io_domain.state AS domain, ta.charge3,
                 ta.usize, ta.vmpnum, ta.dateinsert, ta.cpucore, ta.memory, ta.dateupdate, ta.isfix
@@ -1089,6 +1202,8 @@ def export_filtered_asset():
         'vcenter': '상위 자산',
         'datein': '설치일자',
         'dateout': '폐기일자',
+        'eos': 'EOS 일자',
+        'eosl': 'EOSL 일자',
         'charge': '담당자(정)',
         'charge2': '담당자(부)',
         'isoper': '사용여부',
@@ -1165,7 +1280,7 @@ def download_template():
     # 헤더 행 추가
     headers = [
         '서버명*', 'IP 주소*', '호스트 이름', 'ITAM자산번호', '센터', '상면번호', '상단번호',
-        '도메인*', '그룹*', '설치일자', '폐기일자', '담당자(정)', '담당자(부)', '사용여부*',
+        '도메인*', '그룹*', '설치일자', '폐기일자', 'EOS 일자', 'EOSL 일자', '담당자(정)', '담당자(부)', '사용여부*',
         '서비스구분*', '전원이중화', 'PDU', 'OS*', 'OS버전', '제조사', '모델',
         '시리얼넘버', '현업담당자', '장비크기(U)', '물리코어', '메모리(GB)', '상위자산'
     ]
@@ -1211,7 +1326,7 @@ def download_template():
     isoper_validation.error = "올바른 사용여부를 선택하세요."
     isoper_validation.errorTitle = "입력 오류"
     ws.add_data_validation(isoper_validation)
-    isoper_validation.add(f"N2:N1000")
+    isoper_validation.add(f"P2:P1000")
 
     # 서비스구분 드롭다운
     oper_options = execute_query("SELECT state FROM info_oper")
@@ -1220,7 +1335,7 @@ def download_template():
     oper_validation.error = "올바른 서비스구분을 선택하세요."
     oper_validation.errorTitle = "입력 오류"
     ws.add_data_validation(oper_validation)
-    oper_validation.add(f"O2:O1000")
+    oper_validation.add(f"Q2:Q1000")
 
     # 전원이중화 드롭다운
     power_options = execute_query("SELECT state FROM info_power")
@@ -1229,7 +1344,7 @@ def download_template():
     power_validation.error = "올바른 전원이중화 옵션을 선택하세요."
     power_validation.errorTitle = "입력 오류"
     ws.add_data_validation(power_validation)
-    power_validation.add(f"P2:P1000")
+    power_validation.add(f"R2:R1000")
 
     # OS 드롭다운
     os_options = execute_query("SELECT state FROM info_os")
@@ -1238,7 +1353,7 @@ def download_template():
     os_validation.error = "올바른 OS를 선택하세요."
     os_validation.errorTitle = "입력 오류"
     ws.add_data_validation(os_validation)
-    os_validation.add(f"R2:R1000")
+    os_validation.add(f"T2:T1000")
 
     # 안내 시트 추가
     guide_ws = wb.create_sheet(title="작성 가이드")
@@ -1262,347 +1377,214 @@ def download_template():
         ["상단번호", "서버의 상단 번호를 입력합니다."],
         ["도메인", "드롭다운에서 도메인을 선택합니다. (서버, 스위치, 스토리지, 어플라이언스)"],
         ["그룹", "드롭다운에서 그룹을 선택합니다. (물리, 논리, L2, L3 등)"],
-        ["설치일자", "서버 설치 일자를 YYYY-MM-DD 형식으로 입력합니다."],
-        ["폐기일자", "서버 폐기 일자를 YYYY-MM-DD 형식으로 입력합니다."],
-        ["담당자(정)", "주 담당자 이름을 입력합니다."],
-        ["담당자(부)", "부 담당자 이름을 입력합니다."],
-        ["사용여부", "드롭다운에서 사용 여부를 선택합니다."],
-        ["서비스구분", "드롭다운에서 서비스 구분을 선택합니다."],
-        ["전원이중화", "드롭다운에서 전원 이중화 여부를 선택합니다."],
-        ["PDU", "PDU 정보를 입력합니다."],
-        ["OS", "드롭다운에서 운영체제를 선택합니다."],
-        ["OS버전", "운영체제 버전을 입력합니다."],
+        ["설치일자", "서버의 설치 날짜를 입력합니다."],
+        ["폐기일자", "서버의 폐기 날짜를 입력합니다."],
+        ["EOS 일자", "서버의 EOS (End of Support) 날짜를 입력합니다."],
+        ["EOSL 일자", "서버의 EOSL (End of Service Life) 날짜를 입력합니다."],
+        ["담당자(정)", "서버의 담당자(정) 이름을 입력합니다."],
+        ["담당자(부)", "서버의 담당자(부) 이름을 입력합니다."],
+        ["사용여부", "드롭다운에서 사용 여부를 선택합니다. (사용, 미사용)"],
+        ["서비스구분", "드롭다운에서 서비스 구분을 선택합니다. (운영, QA, 개발 등)"],
+        ["전원이중화", "드롭다운에서 전원 이중화 여부를 선택합니다. (이중화, 단일)"],
+        ["PDU", "서버가 연결된 PDU 정보를 입력합니다."],
+        ["OS", "드롭다운에서 OS를 선택합니다. (Windows, Linux 등)"],
+        ["OS버전", "서버의 OS 버전을 입력합니다."],
         ["제조사", "서버 제조사를 입력합니다."],
         ["모델", "서버 모델명을 입력합니다."],
         ["시리얼넘버", "서버 시리얼 번호를 입력합니다."],
-        ["현업담당자", "현업 담당자 이름을 입력합니다."],
-        ["장비크기(U)", "서버 장비 크기를 U 단위로 입력합니다."],
+        ["현업담당자", "서버의 현업 담당자를 입력합니다."],
+        ["장비크기(U)", "서버의 장비 크기를 U 단위로 입력합니다."],
         ["물리코어", "서버의 물리 코어 수를 입력합니다."],
         ["메모리(GB)", "서버의 메모리 크기를 GB 단위로 입력합니다."],
-        ["상위자산", "논리 자산인 경우 상위 물리 서버의 자산 번호를 입력합니다."]
+        ["상위자산", "상위 자산의 자산고유번호(pnum)를 입력합니다. (논리 서버인 경우)"]
     ]
 
-    for row_idx, row_data in enumerate(guide_rows, 2):
-        for col_idx, cell_value in enumerate(row_data, 1):
-            guide_ws.cell(row=row_idx, column=col_idx, value=cell_value)
+    for row in guide_rows:
+        guide_ws.append(row)
 
-    # 가이드 시트 열 너비 설정
-    guide_ws.column_dimensions['A'].width = 15
-    guide_ws.column_dimensions['B'].width = 50
+    # 스타일 및 높이 조정
+    for row in guide_ws.iter_rows(min_row=1, max_row=guide_ws.max_row):
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            cell.border = thin_border
+    guide_ws.column_dimensions['A'].width = 25
+    guide_ws.column_dimensions['B'].width = 60
+
+    for row_num in range(1, guide_ws.max_row + 1):
+        guide_ws.row_dimensions[row_num].height = 25
 
     # 템플릿 파일 저장
-    os.makedirs(os.path.dirname(template_path), exist_ok=True)
     wb.save(template_path)
 
-    return send_file(template_path, as_attachment=True, download_name='자산_일괄등록_양식.xlsx')
+    # 파일 다운로드 응답 생성
+    return send_file(template_path, as_attachment=True, download_name='asset_template.xlsx')
 
 
-@asset_bp.route('/bulk_upload', methods=['POST'])
-def bulk_upload():
+@asset_bp.route('/import_asset', methods=['GET', 'POST'])
+def import_asset():
     """자산 일괄 등록 처리"""
-    if 'excelFile' not in request.files:
-        return jsonify({
-            'success': False,
-            'message': '업로드된 파일이 없습니다.'
-        })
+    if request.method == 'POST':
+        # 파일 업로드 확인
+        if 'file' not in request.files:
+            flash('업로드할 파일이 없습니다.', 'error')
+            return redirect(request.url)
 
-    file = request.files['excelFile']
+        file = request.files['file']
 
-    if file.filename == '':
-        return jsonify({
-            'success': False,
-            'message': '선택된 파일이 없습니다.'
-        })
+        # 파일 유효성 검사
+        if file.filename == '':
+            flash('파일 이름이 없습니다.', 'error')
+            return redirect(request.url)
 
-    if not file.filename.endswith('.xlsx'):
-        return jsonify({
-            'success': False,
-            'message': 'XLSX 형식의 파일만 업로드 가능합니다.'
-        })
+        if file and allowed_file(file.filename):
+            try:
+                # 파일 저장 (임시)
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(os.getcwd(), 'uploads', filename)
 
-    # 임시 파일로 저장
-    filename = secure_filename(file.filename)
-    temp_path = os.path.join(os.getcwd(), 'uploads', filename)
-    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-    file.save(temp_path)
+                # uploads 폴더가 없으면 생성
+                if not os.path.exists(os.path.dirname(filepath)):
+                    os.makedirs(os.path.dirname(filepath))
 
-    try:
-        # 엑셀 파일 로드
-        wb = openpyxl.load_workbook(temp_path)
-        ws = wb.active
+                file.save(filepath)
 
-        # 헤더 확인
-        headers = [cell.value for cell in ws[1]]
-        expected_headers = [
-            '서버명*', 'IP 주소*', '호스트 이름', 'ITAM자산번호', '센터', '상면번호', '상단번호',
-            '도메인*', '그룹*', '설치일자', '폐기일자', '담당자(정)', '담당자(부)', '사용여부*',
-            '서비스구분*', '전원이중화', 'PDU', 'OS*', 'OS버전', '제조사', '모델',
-            '시리얼넘버', '현업담당자', '장비크기(U)', '물리코어', '메모리(GB)', '상위자산'
-        ]
+                # 엑셀 파일 읽기
+                wb = openpyxl.load_workbook(filepath)
+                ws = wb['자산 등록']  # 시트 이름 확인
 
-        if headers != expected_headers:
-            return jsonify({
-                'success': False,
-                'message': '양식이 올바르지 않습니다. 제공된 템플릿을 사용해주세요.'
-            })
+                # 데이터 읽기 (헤더 제외)
+                data = []
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    data.append(row)
 
-        # 데이터 추출 및 검증
-        data = []
-        errors = []
-
-        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-            if all(cell is None or cell == '' for cell in row):
-                continue  # 빈 행 무시
-
-            # 필수 필드 검증
-            if not row[0]:  # 서버명
-                errors.append({'row': row_idx, 'column': '서버명*', 'message': '서버명은 필수 입력 항목입니다.'})
-
-            if not row[1]:  # IP 주소
-                errors.append({'row': row_idx, 'column': 'IP 주소*', 'message': 'IP 주소는 필수 입력 항목입니다.'})
-
-            # 도메인 검증
-            domain_value = row[7]
-            if not domain_value:
-                errors.append({'row': row_idx, 'column': '도메인*', 'message': '도메인은 필수 입력 항목입니다.'})
-            else:
-                domain_options = [option['state'] for option in execute_query("SELECT state FROM info_domain")]
-                if domain_value not in domain_options:
-                    errors.append(
-                        {'row': row_idx, 'column': '도메인*', 'message': f'도메인은 {", ".join(domain_options)} 중 하나여야 합니다.'})
-
-            # 그룹 검증
-            group_value = row[8]
-            if not group_value:
-                errors.append({'row': row_idx, 'column': '그룹*', 'message': '그룹은 필수 입력 항목입니다.'})
-            else:
-                group_options = [option['state'] for option in execute_query("SELECT DISTINCT state FROM info_group")]
-                if group_value not in group_options:
-                    errors.append({'row': row_idx, 'column': '그룹*',
-                                   'message': f'그룹은 {", ".join(group_options)} 중 하나여야 합니다.'})
-
-            # 사용여부 검증
-            isoper_value = row[13]
-            if not isoper_value:
-                errors.append({'row': row_idx, 'column': '사용여부*', 'message': '사용여부는 필수 입력 항목입니다.'})
-            else:
-                isoper_options = [option['state'] for option in execute_query("SELECT state FROM info_isoper")]
-                if isoper_value not in isoper_options:
-                    errors.append({'row': row_idx, 'column': '사용여부*',
-                                   'message': f'사용여부는 {", ".join(isoper_options)} 중 하나여야 합니다.'})
-
-            # 서비스구분 검증
-            oper_value = row[14]
-            if not oper_value:
-                errors.append({'row': row_idx, 'column': '서비스구분*', 'message': '서비스구분은 필수 입력 항목입니다.'})
-            else:
-                oper_options = [option['state'] for option in execute_query("SELECT state FROM info_oper")]
-                if oper_value not in oper_options:
-                    errors.append({'row': row_idx, 'column': '서비스구분*',
-                                   'message': f'서비스구분은 {", ".join(oper_options)} 중 하나여야 합니다.'})
-
-            # OS 검증
-            os_value = row[17]
-            if not os_value:
-                errors.append({'row': row_idx, 'column': 'OS*', 'message': 'OS는 필수 입력 항목입니다.'})
-            else:
-                os_options = [option['state'] for option in execute_query("SELECT state FROM info_os")]
-                if os_value not in os_options:
-                    errors.append(
-                        {'row': row_idx, 'column': 'OS*', 'message': f'OS는 {", ".join(os_options)} 중 하나여야 합니다.'})
-
-            # 전원이중화 검증 (필수는 아님)
-            power_value = row[15]
-            if power_value:
-                power_options = [option['state'] for option in execute_query("SELECT state FROM info_power")]
-                if power_value not in power_options:
-                    errors.append({'row': row_idx, 'column': '전원이중화',
-                                   'message': f'전원이중화는 {", ".join(power_options)} 중 하나여야 합니다.'})
-
-            # 날짜 형식 검증
-            datein = row[9]
-            if datein:
+                # 데이터베이스 연결
+                db = get_db_connection()
                 try:
-                    if isinstance(datein, str):
-                        datetime.strptime(datein, '%Y-%m-%d')
-                    # 엑셀 날짜 형식인 경우는 이미 datetime 객체로 로드됨
-                except ValueError:
-                    errors.append({'row': row_idx, 'column': '설치일자', 'message': '설치일자는 YYYY-MM-DD 형식이어야 합니다.'})
+                    with db.cursor() as cursor:
+                        # SQL 쿼리 작성
+                        sql = """
+                            INSERT INTO total_asset (
+                                servername, ip, hostname, itamnum, center, loc1, loc2,
+                                domain, `group`, datein, dateout, eos, eosl, charge, charge2,
+                                isoper, oper, power, pdu, os, osver, maker, model,
+                                serial, charge3, usize, cpucore, memory, vcenter, isfix, dateupdate
+                            ) VALUES (
+                                %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s
+                            )
+                        """
 
-            dateout = row[10]
-            if dateout:
-                try:
-                    if isinstance(dateout, str):
-                        datetime.strptime(dateout, '%Y-%m-%d')
-                except ValueError:
-                    errors.append({'row': row_idx, 'column': '폐기일자', 'message': '폐기일자는 YYYY-MM-DD 형식이어야 합니다.'})
+                        # 데이터 변환 및 정리
+                        processed_data = []
+                        for row in data:
+                            # 날짜 형식 변환
+                            try:
+                                datein = datetime.strptime(str(row[9]), '%Y-%m-%d').date() if row[9] else None
+                            except (ValueError, TypeError):
+                                datein = None
 
-            # 상위자산 검증 (그룹이 '논리'인 경우에만)
-            if group_value == '논리':
-                vcenter = row[26]  # 상위자산
-                if vcenter:
-                    # 상위자산이 존재하는지 확인
-                    sql = "SELECT COUNT(*) as count FROM total_asset WHERE pnum = %s AND `group` = 0"
-                    result = execute_query(sql, (vcenter,), fetch_all=False)
-                    if result['count'] == 0:
-                        errors.append(
-                            {'row': row_idx, 'column': '상위자산', 'message': f'상위자산 번호 {vcenter}에 해당하는 물리 서버가 존재하지 않습니다.'})
+                            try:
+                                dateout = datetime.strptime(str(row[10]), '%Y-%m-%d').date() if row[10] else None
+                            except (ValueError, TypeError):
+                                dateout = None
 
-            # 데이터 추가
-            data.append({
-                'servername': row[0],
-                'ip': row[1],
-                'hostname': row[2],
-                'itamnum': row[3],
-                'center': row[4],
-                'loc1': row[5],
-                'loc2': row[6],
-                'domain': row[7],
-                'group': row[8],
-                'datein': row[9],
-                'dateout': row[10],
-                'charge': row[11],
-                'charge2': row[12],
-                'isoper': row[13],
-                'oper': row[14],
-                'power': row[15],
-                'pdu': row[16],
-                'os': row[17],
-                'osver': row[18],
-                'maker': row[19],
-                'model': row[20],
-                'serial': row[21],
-                'charge3': row[22],
-                'usize': row[23],
-                'cpucore': row[24],
-                'memory': row[25],
-                'vcenter': row[26] if row[8] == '논리' else None
-            })
+                            try:
+                                eos = datetime.strptime(str(row[11]), '%Y-%m-%d').date() if row[11] else None
+                            except (ValueError, TypeError):
+                                eos = None
 
-        # 오류가 있으면 처리 중단
-        if errors:
-            return jsonify({
-                'success': False,
-                'message': f'{len(errors)}개의 오류가 발견되었습니다. 수정 후 다시 시도해주세요.',
-                'errors': errors
-            })
+                            try:
+                                eosl = datetime.strptime(str(row[12]), '%Y-%m-%d').date() if row[12] else None
+                            except (ValueError, TypeError):
+                                eosl = None
 
-        # 데이터 DB에 저장
-        inserted_count = 0
-        db = get_db_connection()
-        try:
-            with db.cursor() as cursor:
-                for item in data:
-                    # 코드값 조회
-                    # domain
-                    cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (item['domain'],))
-                    domain_value = cursor.fetchone()
-                    domain = domain_value['domain'] if domain_value else 0
+                            # 코드 값 변환 (state -> code)
+                            try:
+                                # 도메인
+                                cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (row[7],))
+                                domain_value = cursor.fetchone()
+                                domain = domain_value['domain'] if domain_value else None
 
-                    # group
-                    cursor.execute("SELECT `group` FROM info_group WHERE state = %s AND domain = %s",
-                                   (item['group'], domain))
-                    group_value = cursor.fetchone()
-                    group = group_value['group'] if group_value else 0
+                                # 그룹
+                                cursor.execute("SELECT `group` FROM info_group WHERE state = %s AND domain = %s",
+                                               (row[8], domain))
+                                group_value = cursor.fetchone()
+                                group = group_value['group'] if group_value else None
 
-                    # isoper
-                    cursor.execute("SELECT isoper FROM info_isoper WHERE state = %s", (item['isoper'],))
-                    isoper_value = cursor.fetchone()
-                    isoper = isoper_value['isoper'] if isoper_value else 0
+                                # 사용여부
+                                cursor.execute("SELECT isoper FROM info_isoper WHERE state = %s", (row[15],))
+                                isoper_value = cursor.fetchone()
+                                isoper = isoper_value['isoper'] if isoper_value else None
 
-                    # oper
-                    cursor.execute("SELECT oper FROM info_oper WHERE state = %s", (item['oper'],))
-                    oper_value = cursor.fetchone()
-                    oper = oper_value['oper'] if oper_value else 0
+                                # 서비스구분
+                                cursor.execute("SELECT oper FROM info_oper WHERE state = %s", (row[16],))
+                                oper_value = cursor.fetchone()
+                                oper = oper_value['oper'] if oper_value else None
 
-                    # power
-                    power = None
-                    if item['power']:
-                        cursor.execute("SELECT power FROM info_power WHERE state = %s", (item['power'],))
-                        power_value = cursor.fetchone()
-                        power = power_value['power'] if power_value else None
+                                # 전원이중화
+                                cursor.execute("SELECT power FROM info_power WHERE state = %s", (row[17],))
+                                power_value = cursor.fetchone()
+                                power = power_value['power'] if power_value else None
 
-                    # os
-                    cursor.execute("SELECT os FROM info_os WHERE state = %s", (item['os'],))
-                    os_value = cursor.fetchone()
-                    os_code = os_value['os'] if os_value else 0
+                                # OS
+                                cursor.execute("SELECT os FROM info_os WHERE state = %s", (row[19],))
+                                os_value = cursor.fetchone()
+                                os_code = os_value['os'] if os_value else None
 
-                    # 날짜 처리
-                    datein = item['datein']
-                    if isinstance(datein, str) and datein:
-                        datein = datetime.strptime(datein, '%Y-%m-%d').date()
-                    elif isinstance(datein, datetime):
-                        datein = datein.date()
+                            except Exception as e:
+                                flash(f"코드 변환 중 오류 발생: {e}", 'error')
+                                return redirect(request.url)
 
-                    dateout = item['dateout']
-                    if isinstance(dateout, str) and dateout:
-                        dateout = datetime.strptime(dateout, '%Y-%m-%d').date()
-                    elif isinstance(dateout, datetime):
-                        dateout = dateout.date()
+                            # vcenter 처리
+                            vcenter = row[28] if row[28] else None
 
-                    # 숫자 필드 처리
-                    loc2 = int(item['loc2']) if item['loc2'] else None
-                    usize = int(item['usize']) if item['usize'] else 1
-                    cpucore = int(item['cpucore']) if item['cpucore'] else None
-                    memory = int(item['memory']) if item['memory'] else None
-                    vcenter = int(item['vcenter']) if item['vcenter'] else None
+                            # isfix, dateupdate 설정
+                            isfix = 0
+                            dateupdate = datetime.now()
 
-                    # 현재 시간
-                    now = datetime.now()
+                            processed_data.append((
+                                row[0], row[1], row[2], row[3], row[4], row[5], row[6],
+                                domain, group, datein, dateout, eos, eosl, row[13], row[14],
+                                isoper, oper, power, row[18], os_code, row[20], row[21], row[22],
+                                row[23], row[24], row[25], row[26], row[27], vcenter, isfix, dateupdate
+                            ))
 
-                    # SQL 쿼리
-                    sql = """INSERT INTO total_asset (
-                        itamnum, servername, ip, hostname, center, loc1, loc2, `group`, vcenter, 
-                        datein, dateout, charge, charge2, isoper, oper, power, pdu, os, osver, 
-                        maker, model, serial, domain, charge3, usize, cpucore, memory, 
-                        isfix, dateinsert, dateupdate
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                    )"""
+                        # 데이터 삽입
+                        cursor.executemany(sql, processed_data)
+                        db.commit()
 
-                    cursor.execute(sql, (
-                        item['itamnum'], item['servername'], item['ip'], item['hostname'],
-                        item['center'], item['loc1'], loc2, group, vcenter,
-                        datein, dateout, item['charge'], item['charge2'],
-                        isoper, oper, power, item['pdu'], os_code, item['osver'],
-                        item['maker'], item['model'], item['serial'], domain, item['charge3'],
-                        usize, cpucore, memory, 1, now, now
-                    ))
+                        # 성공 메시지
+                        flash(f'{len(data)}개의 자산이 성공적으로 등록되었습니다.', 'success')
 
-                    inserted_count += 1
+                        # 캐시 무효화
+                        invalidate_cache_pattern('index_data')
+                        invalidate_cache_pattern('asset_data')
+                        invalidate_cache_pattern('asset_graph')
 
-                db.commit()
-        except Exception as e:
-            db.rollback()
-            return jsonify({
-                'success': False,
-                'message': f'데이터 저장 중 오류가 발생했습니다: {str(e)}'
-            })
-        finally:
-            db.close()
+                except Exception as e:
+                    db.rollback()
+                    flash(f'데이터베이스 오류 발생: {e}', 'error')
+                finally:
+                    db.close()
 
-        # ���시 무효화
-        invalidate_cache_pattern('index_data')
-        invalidate_cache_pattern('asset_data')
-        invalidate_cache_pattern('asset_graph')
+                # 임시 파일 삭제
+                os.remove(filepath)
 
-        return jsonify({
-            'success': True,
-            'message': f'{inserted_count}개의 자산이 성공적으로 등록되었습니다.',
-            'details': {
-                '총 등록 자산': inserted_count,
-                '물리 서버': sum(1 for item in data if item['group'] == '물리'),
-                '논리 서버': sum(1 for item in data if item['group'] == '논리')
-            }
-        })
+            except Exception as e:
+                flash(f'파일 처리 오류 발생: {e}', 'error')
+                return redirect(request.url)
 
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'파일 처리 중 오류가 발생했습니다: {str(e)}'
-        })
-    finally:
-        # 임시 파일 삭제
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+            return redirect(url_for('asset.index'))
+
+        else:
+            flash('잘못된 파일 형식입니다. 엑셀 파일(.xlsx)만 허용됩니다.', 'error')
+            return redirect(request.url)
+
+    return render_template('import.html')
+
+
+def allowed_file(filename):
+    """허용된 파일 형식인지 검사"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'xlsx'}

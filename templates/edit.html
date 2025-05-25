@@ -79,7 +79,7 @@
                     <label for="domain">도메인:</label>
                     <select class="form-control" id="domain" name="domain" required>
                         {% for option in domain_options %}
-                        <option value="{{ option.state }}" {% if data.domain_state == option.state %}selected{% endif %}>{{ option.state }}</option>
+                        <option value="{{ option.domain }}" {% if data.domain_state == option.state %}selected{% endif %}>{{ option.state }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -99,27 +99,45 @@
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="datein">설치일자:</label>
-                    <input type="date" class="form-control" id="datein" name="datein" value="{{ data.datein }}">
+                    <input type="date" class="form-control" id="datein" name="datein" value="{{ data.datein|default('', true)|string }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="dateout">폐기일자:</label>
-                    <input type="date" class="form-control" id="dateout" name="dateout" value="{{ data.dateout }}">
+                    <input type="date" class="form-control" id="dateout" name="dateout" value="{{ data.dateout|default('', true)|string }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
-                    <label for="charge">담당자(정):</label>
-                    <input type="text" class="form-control" id="charge" name="charge" value="{{ data.charge }}">
+                    <label for="eos">EOS 일자:</label>
+                    <input type="date" class="form-control" id="eos" name="eos" value="{{ data.eos|default('', true)|string }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="eosl">EOSL 일자:</label>
+                    <input type="date" class="form-control" id="eosl" name="eosl" value="{{ data.eosl|default('', true)|string }}">
                 </div>
             </div>
         </div>
         <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
+                    <label for="charge">담당자(정):</label>
+                    <input type="text" class="form-control" id="charge" name="charge" value="{{ data.charge|default('', true) }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
                     <label for="charge2">담당자(부):</label>
                     <input type="text" class="form-control" id="charge2" name="charge2" value="{{ data.charge2 }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="charge3">현업담당자:</label>
+                    <input type="text" class="form-control" id="charge3" name="charge3" value="{{ data.charge3 }}">
                 </div>
             </div>
             <div class="col-md-3">
@@ -132,6 +150,8 @@
                     </select>
                 </div>
             </div>
+        </div>
+        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="oper">서비스구분:</label>
@@ -152,14 +172,20 @@
                     </select>
                 </div>
             </div>
-        </div>
-        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="pdu">PDU:</label>
                     <input type="text" class="form-control" id="pdu" name="pdu" value="{{ data.pdu }}">
                 </div>
             </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="usize">장비크기(U):</label>
+                    <input type="number" class="form-control" id="usize" name="usize" min="1" value="{{ data.usize|default(1) }}">
+                </div>
+            </div>
+        </div>
+        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="os">OS:</label>
@@ -182,34 +208,20 @@
                     <input type="text" class="form-control" id="maker" name="maker" value="{{ data.maker }}">
                 </div>
             </div>
-        </div>
-        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="model">모델명:</label>
                     <input type="text" class="form-control" id="model" name="model" value="{{ data.model }}">
                 </div>
             </div>
+        </div>
+        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="serial">시리얼넘버:</label>
                     <input type="text" class="form-control" id="serial" name="serial" value="{{ data.serial }}">
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="charge3">현업담당자:</label>
-                    <input type="text" class="form-control" id="charge3" name="charge3" value="{{ data.charge3 }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="usize">장비크기(U):</label>
-                    <input type="number" class="form-control" id="usize" name="usize" min="1" value="{{ data.usize|default(1) }}">
-                </div>
-            </div>
-        </div>
-        <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="cpucore">물리코어:</label>
@@ -420,6 +432,12 @@
         $('#domain').on('change', function() {
             const domain = $(this).val();
 
+            if (!domain) {
+                // 도메인이 선택되지 않은 경우 그룹 옵션 초기화
+                $('#group').empty().append('<option value="">모두</option>');
+                return;
+            }
+
             // AJAX 요청으로 해당 도메인의 그룹 옵션 가져오기
             $.ajax({
                 url: '/get_groups',
@@ -442,6 +460,7 @@
                 }
             });
         });
+
 
         // 그룹 변경 시 상위 자산 필드 표시/숨김
         $('#group').on('change', function() {
@@ -635,7 +654,7 @@
                 });
 
                 // 서비스 행 더블 클릭 이벤트
-                $('.service-row').dblclick(function() {
+                $('.service-row').on('dblclick', function() {
                     var appIdx = $(this).data('id');
                     window.location.href = "/service/edit/" + appIdx;
                 });

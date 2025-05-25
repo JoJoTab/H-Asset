@@ -250,6 +250,32 @@
                     </a>
                 </li>
                 <li>
+                    <a href="#rackSubmenu" data-toggle="collapse" aria-expanded="false" class="dropdown-toggle">
+                        <i class="fas fa-server"></i>
+                        <span class="menu-text">상면도</span>
+                    </a>
+                    <ul class="collapse list-unstyled" id="rackSubmenu">
+                        <li>
+                            <a href="{{ url_for('rack.racklayout') }}">
+                                <i class="fas fa-circle fa-sm"></i>
+                                <span class="menu-text">상면도</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="{{ url_for('rack.rackview') }}">
+                                <i class="fas fa-circle fa-sm"></i>
+                                <span class="menu-text">실장도</span>
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+                <li>
+                    <a href="{{ url_for('service.index') }}">
+                        <i class="fas fa-cogs"></i>
+                        <span class="menu-text">서비스 관리</span>
+                    </a>
+                </li>
+                <li>
                     <a href="{{ url_for('storage.storage') }}">
                         <i class="fas fa-database"></i>
                         <span class="menu-text">스토리지</span>
@@ -276,35 +302,9 @@
                     </ul>
                 </li>
                 <li>
-                    <a href="#rackSubmenu" data-toggle="collapse" aria-expanded="false" class="dropdown-toggle">
-                        <i class="fas fa-server"></i>
-                        <span class="menu-text">상면도</span>
-                    </a>
-                    <ul class="collapse list-unstyled" id="rackSubmenu">
-                        <li>
-                            <a href="{{ url_for('rack.racklayout') }}">
-                                <i class="fas fa-circle fa-sm"></i>
-                                <span class="menu-text">상면도</span>
-                            </a>
-                        </li>
-                        <li>
-                            <a href="{{ url_for('rack.racklayout_edit') }}">
-                                <i class="fas fa-circle fa-sm"></i>
-                                <span class="menu-text">상면도 편집</span>
-                            </a>
-                        </li>
-                    </ul>
-                </li>
-                <li>
                     <a href="{{ url_for('file.fileindex') }}">
                         <i class="fas fa-file"></i>
                         <span class="menu-text">파일 관리</span>
-                    </a>
-                </li>
-                <li>
-                    <a href="{{ url_for('service.index') }}">
-                        <i class="fas fa-cogs"></i>
-                        <span class="menu-text">서비스 관리</span>
                     </a>
                 </li>
             </ul>
@@ -312,7 +312,7 @@
 
         <!-- 메인 콘텐츠 -->
         <div id="content">
-            <!-- 플래시 메시지 표시 -->
+            <!-- ���래시 메시지 표시 -->
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     <div class="flash-messages">

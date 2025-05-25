@@ -1,9 +1,12 @@
 {% extends 'base.html' %}
 
+{% block head %}
+{{ ckeditor.load() }}
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid">
     <h1 class="h3 mb-2 text-gray-800">서비스 추가</h1>
-    <p class="mb-4">새로운 서비스를 추가합니다.</p>
 
     <div class="card shadow mb-4">
         <div class="card-header py-3">
@@ -14,31 +17,37 @@
                 <div class="form-group row">
                     <label for="app_servicecode" class="col-sm-2 col-form-label">서비스 코드:</label>
                     <div class="col-sm-10">
-                        <input type="text" class="form-control" id="app_servicecode" name="app_servicecode" placeholder="서비스 코드">
+                        <input type="text" class="form-control" id="app_servicecode" name="app_servicecode" required>
                     </div>
                 </div>
                 <div class="form-group row">
                     <label for="app_name" class="col-sm-2 col-form-label">서비스명:</label>
                     <div class="col-sm-10">
-                        <input type="text" class="form-control" id="app_name" name="app_name" placeholder="서비스명" required>
+                        <input type="text" class="form-control" id="app_name" name="app_name" required>
                     </div>
                 </div>
                 <div class="form-group row">
                     <label for="app_group" class="col-sm-2 col-form-label">서비스 구분:</label>
                     <div class="col-sm-10">
-                        <input type="text" class="form-control" id="app_group" name="app_group" placeholder="서비스 구분">
+                        <input type="text" class="form-control" id="app_group" name="app_group">
                     </div>
                 </div>
                 <div class="form-group row">
                     <label for="app_domain" class="col-sm-2 col-form-label">서비스 도메인:</label>
                     <div class="col-sm-10">
-                        <input type="text" class="form-control" id="app_domain" name="app_domain" placeholder="서비스 도메인">
+                        <input type="text" class="form-control" id="app_domain" name="app_domain">
                     </div>
                 </div>
                 <div class="form-group row">
                     <label for="app_appcode" class="col-sm-2 col-form-label">APP 코드:</label>
                     <div class="col-sm-10">
-                        <input type="text" class="form-control" id="app_appcode" name="app_appcode" placeholder="APP 코드">
+                        <input type="text" class="form-control" id="app_appcode" name="app_appcode">
+                    </div>
+                </div>
+                <div class="form-group row">
+                    <label for="app_comment" class="col-sm-2 col-form-label">서비스 코멘트:</label>
+                    <div class="col-sm-10">
+                        {{ ckeditor.create(name='app_comment') }}
                     </div>
                 </div>
                 <div class="form-group row">

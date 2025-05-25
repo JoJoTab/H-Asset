@@ -27,25 +27,25 @@
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="itamnum">ITAM자산번호:</label>
-                    <input type="text" class="form-control" id="itamnum" name="itamnum">
+                    <input type="text" class="form-control" id="itamnum" name="itamnum" value="{{ search_options.get('itamnum', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="servername">서버명:</label>
-                    <input type="text" class="form-control" id="servername" name="servername">
+                    <input type="text" class="form-control" id="servername" name="servername" value="{{ search_options.get('servername', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="ip">IP 주소:</label>
-                    <input type="text" class="form-control" id="ip" name="ip">
+                    <input type="text" class="form-control" id="ip" name="ip" value="{{ search_options.get('ip', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="hostname">호스트 이름:</label>
-                    <input type="text" class="form-control" id="hostname" name="hostname">
+                    <input type="text" class="form-control" id="hostname" name="hostname" value="{{ search_options.get('hostname', '') }}">
                 </div>
             </div>
         </div>
@@ -53,28 +53,29 @@
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="center">센터:</label>
-                    <input type="text" class="form-control" id="center" name="center">
+                    <input type="text" class="form-control" id="center" name="center" value="{{ search_options.get('center', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="loc1">상면번호:</label>
-                    <input type="text" class="form-control" id="loc1" name="loc1">
+                    <input type="text" class="form-control" id="loc1" name="loc1" value="{{ search_options.get('loc1', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="loc2">상단번호:</label>
-                    <input type="number" class="form-control" id="loc2" name="loc2">
+                    <input type="number" class="form-control" id="loc2" name="loc2" value="{{ search_options.get('loc2', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
-                    <label for="isfix">정합성 확인:</label>
-                    <select class="form-control" id="isfix" name="isfix">
-                        <option value="0" selected>확인 완료</option>
-                        <option value="1">확인 필요</option>
+                    <label for="domain">도메인:</label>
+                    <select class="form-control" id="domain" name="domain">
                         <option value="">모두</option>
+                        {% for option in domain_options %}
+                        <option value="{{ option.domain }}" {% if search_options.get('domain') == option.domain|string or domain_filter == option.domain %}selected{% endif %}>{{ option.state }}</option>
+                        {% endfor %}
                     </select>
                 </div>
             </div>
@@ -82,22 +83,11 @@
         <div class="row">
             <div class="col-md-3">
                 <div class="form-group">
-                    <label for="domain">도메인:</label>
-                    <select class="form-control" id="domain" name="domain">
-                        <option value="">모두</option>
-                        {% for option in domain_options %}
-                        <option value="{{ option.domain }}" {% if domain_filter == option.domain %}selected{% endif %}>{{ option.state }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
                     <label for="group">그룹:</label>
                     <select class="form-control" id="group" name="group">
                         <option value="">모두</option>
                         {% for option in group_options %}
-                        <option value="{{ option.group }}" {% if group_filter == option.group %}selected{% endif %}>{{ option.state }}</option>
+                        <option value="{{ option.group }}" {% if search_options.get('group') == option.group|string or group_filter == option.group %}selected{% endif %}>{{ option.state }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -105,13 +95,19 @@
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="charge">담당자(정):</label>
-                    <input type="text" class="form-control" id="charge" name="charge">
+                    <input type="text" class="form-control" id="charge" name="charge" value="{{ search_options.get('charge', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="charge2">담당자(부):</label>
-                    <input type="text" class="form-control" id="charge2" name="charge2">
+                    <input type="text" class="form-control" id="charge2" name="charge2" value="{{ search_options.get('charge2', '') }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="charge3">현업 담당자:</label>
+                    <input type="text" class="form-control" id="charge3" name="charge3" value="{{ search_options.get('charge3', '') }}">
                 </div>
             </div>
         </div>
@@ -121,9 +117,9 @@
                     <label for="isoper">사용여부:</label>
                     <select class="form-control" id="isoper" name="isoper">
                         <option value="">모두</option>
-                        <option value="0">사용</option>
-                        <option value="1">일시정지</option>
-                        <option value="2">사용안함</option>
+                        <option value="0" {% if search_options.get('isoper') == '0' %}selected{% endif %}>사용</option>
+                        <option value="1" {% if search_options.get('isoper') == '1' %}selected{% endif %}>일시정지</option>
+                        <option value="2" {% if search_options.get('isoper') == '2' %}selected{% endif %}>사용안함</option>
                     </select>
                 </div>
             </div>
@@ -132,10 +128,10 @@
                     <label for="oper">서비스구분:</label>
                     <select class="form-control" id="oper" name="oper">
                         <option value="">모두</option>
-                        <option value="0">운영</option>
-                        <option value="1">QA</option>
-                        <option value="2">개발</option>
-                        <option value="4">DR</option>
+                        <option value="0" {% if search_options.get('oper') == '0' %}selected{% endif %}>운영</option>
+                        <option value="1" {% if search_options.get('oper') == '1' %}selected{% endif %}>QA</option>
+                        <option value="2" {% if search_options.get('oper') == '2' %}selected{% endif %}>개발</option>
+                        <option value="4" {% if search_options.get('oper') == '4' %}selected{% endif %}>DR</option>
                     </select>
                 </div>
             </div>
@@ -144,9 +140,9 @@
                     <label for="power">전원 이중화:</label>
                     <select class="form-control" id="power" name="power">
                         <option value="">모두</option>
-                        <option value="0">전원미사용</option>
-                        <option value="1">이중화</option>
-                        <option value="2">단일</option>
+                        <option value="0" {% if search_options.get('power') == '0' %}selected{% endif %}>전원미사용</option>
+                        <option value="1" {% if search_options.get('power') == '1' %}selected{% endif %}>이중화</option>
+                        <option value="2" {% if search_options.get('power') == '2' %}selected{% endif %}>단일</option>
                     </select>
                 </div>
             </div>
@@ -155,10 +151,10 @@
                     <label for="os">OS:</label>
                     <select class="form-control" id="os" name="os">
                         <option value="">모두</option>
-                        <option value="Linux">Linux</option>
-                        <option value="Windows">Windows</option>
-                        <option value="AIX">AIX</option>
-                        <option value="HP-UX">HP-UX</option>
+                        <option value="Linux" {% if search_options.get('os') == 'Linux' %}selected{% endif %}>Linux</option>
+                        <option value="Windows" {% if search_options.get('os') == 'Windows' %}selected{% endif %}>Windows</option>
+                        <option value="AIX" {% if search_options.get('os') == 'AIX' %}selected{% endif %}>AIX</option>
+                        <option value="HP-UX" {% if search_options.get('os') == 'HP-UX' %}selected{% endif %}>HP-UX</option>
                     </select>
                 </div>
             </div>
@@ -167,19 +163,55 @@
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="osver">OS버전:</label>
-                    <input type="text" class="form-control" id="osver" name="osver">
+                    <input type="text" class="form-control" id="osver" name="osver" value="{{ search_options.get('osver', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="serial">시리얼넘버:</label>
-                    <input type="text" class="form-control" id="serial" name="serial">
+                    <input type="text" class="form-control" id="serial" name="serial" value="{{ search_options.get('serial', '') }}">
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="form-group">
-                    <label for="charge3">현업 담당자:</label>
-                    <input type="text" class="form-control" id="charge3" name="charge3">
+                    <label for="isfix">정합성 확인:</label>
+                    <select class="form-control" id="isfix" name="isfix">
+                        <option value="0" {% if search_options.get('isfix') == '0' %}selected{% endif %}>확인 완료</option>
+                        <option value="1" {% if search_options.get('isfix') == '1' %}selected{% endif %}>확인 필요</option>
+                        <option value="" {% if search_options.get('isfix') == '' %}selected{% endif %}>모두</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="model">모델명:</label>
+                    <input type="text" class="form-control" id="model" name="model" value="{{ search_options.get('model', '') }}">
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="datein">설치일자:</label>
+                    <input type="date" class="form-control" id="datein" name="datein" value="{{ search_options.get('datein', '') }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="dateout">폐기일자:</label>
+                    <input type="date" class="form-control" id="dateout" name="dateout" value="{{ search_options.get('dateout', '') }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="eos">EOS 일자:</label>
+                    <input type="date" class="form-control" id="eos" name="eos" value="{{ search_options.get('eos', '') }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    <label for="eosl">EOSL 일자:</label>
+                    <input type="date" class="form-control" id="eosl" name="eosl" value="{{ search_options.get('eosl', '') }}">
                 </div>
             </div>
         </div>
@@ -326,12 +358,6 @@
                     <div class="row">
                         <div class="col-md-2">
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="maker" {% if selected_columns and 'maker' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">제조사</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
                                 <input class="form-check-input" type="checkbox" name="columns" value="datein" {% if selected_columns and 'datein' in selected_columns %}checked{% endif %}>
                                 <label class="form-check-label">설치일자</label>
                             </div>
@@ -340,6 +366,18 @@
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" name="columns" value="dateout" {% if selected_columns and 'dateout' in selected_columns %}checked{% endif %}>
                                 <label class="form-check-label">폐기일자</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="eos" {% if selected_columns and 'eos' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">EOS 일자</label>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columns" value="eosl" {% if selected_columns and 'eosl' in selected_columns %}checked{% endif %}>
+                                <label class="form-check-label">EOSL 일자</label>
                             </div>
                         </div>
                         <div class="col-md-2">
@@ -474,6 +512,9 @@
                             text: group.state
                         }));
                     });
+
+                    // 그룹 변경 이벤트 트리거
+                    groupSelect.trigger('change');
                 }
             });
         });
@@ -557,8 +598,32 @@
                 url.searchParams.append('columns', column);
             });
 
-            // 페이지 이동
-            window.location.href = url.toString();
+            // 검색 옵션 유지를 위해 폼 생성 및 제출
+            var form = $('<form>').attr({
+                method: 'POST',
+                action: url.pathname
+            });
+
+            // 선택된 열 추가
+            selectedColumns.forEach(function(column) {
+                form.append($('<input>').attr({
+                    type: 'hidden',
+                    name: 'columns',
+                    value: column
+                }));
+            });
+
+            // 기존 검색 옵션 추가
+            {% for key, value in search_options.items() %}
+                form.append($('<input>').attr({
+                    type: 'hidden',
+                    name: '{{ key }}',
+                    value: '{{ value }}'
+                }));
+            {% endfor %}
+
+            // 폼을 body에 추가하고 제출
+            form.appendTo('body').submit();
         });
     });
 </script>

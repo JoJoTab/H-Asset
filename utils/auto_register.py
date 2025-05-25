@@ -169,8 +169,8 @@ def update_existing_asset(asset, hostname, ip_address, servername, is_active, cp
 
     # 변경 사항이 있으면 업데이트
     if changes:
-        # isfix를 2로 설정 (자동 변경 감지)
-        changes['isfix'] = 2
+        # isfix를 0으로 설정 (확인 완료 상태)
+        changes['isfix'] = 0
         changes['dateupdate'] = datetime.now()
 
         # SQL 쿼리 생성
@@ -252,7 +252,7 @@ def add_new_asset(hostname, ip_address, servername, is_active, cpus, memory_gb, 
         cpus if not pd.isna(cpus) else None,  # cpucore
         memory_gb if not pd.isna(memory_gb) else None,  # memory
         0,  # domain (서버로 설정)
-        2,  # isfix (자동 등록으로 2)
+        0,  # isfix (확인 완료 상태로 설정)
         now,  # dateinsert
         now  # dateupdate
     )
@@ -286,7 +286,7 @@ def handle_auto_registered_assets(action, selected_assets):
             duplicates = execute_query(sql_check, (asset['ip'], asset['hostname'], pnum))
 
             if duplicates:
-                # 중복 자산이 있으면 해당 자산을 사용안함, 폐기 상태로 변경
+                # 중복 자산이 있으면 해�� 자산을 사용안함, 폐기 상태로 변경
                 for dup in duplicates:
                     sql_update_dup = """
                     UPDATE total_asset 

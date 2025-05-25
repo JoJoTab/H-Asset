@@ -41,6 +41,12 @@
                     </div>
                 </div>
                 <div class="form-group row">
+                    <label for="app_comment" class="col-sm-2 col-form-label">서비스 코멘트:</label>
+                    <div class="col-sm-10">
+                        <textarea class="form-control" id="app_comment" name="app_comment" rows="5">{{ service.app_comment or '' }}</textarea>
+                    </div>
+                </div>
+                <div class="form-group row">
                     <div class="col-sm-10 offset-sm-2">
                         <button type="submit" class="btn btn-primary">저장</button>
                         <a href="{{ url_for('service.index') }}" class="btn btn-secondary">취소</a>
@@ -49,13 +55,65 @@
             </form>
         </div>
     </div>
-
+<!--    &lt;!&ndash; 서비스 파일 관리 &ndash;&gt;-->
+<!--    <div class="card shadow mb-4">-->
+<!--        <div class="card-header py-3 d-flex justify-content-between align-items-center">-->
+<!--            <h6 class="m-0 font-weight-bold text-primary">서비스 파일</h6>-->
+<!--            <button class="btn btn-primary btn-sm" data-toggle="modal" data-target="#uploadFileModal">-->
+<!--                <i class="fas fa-upload"></i> 파일 업로드-->
+<!--            </button>-->
+<!--        </div>-->
+<!--        <div class="card-body">-->
+<!--            <div class="table-responsive">-->
+<!--                <table class="table table-bordered" id="serviceFilesTable" width="100%" cellspacing="0">-->
+<!--                    <thead>-->
+<!--                        <tr>-->
+<!--                            <th>파일명</th>-->
+<!--                            <th>크기</th>-->
+<!--                            <th>업로드 날짜</th>-->
+<!--                            <th>관리</th>-->
+<!--                        </tr>-->
+<!--                    </thead>-->
+<!--                    <tbody>-->
+<!--                        {% for file in service_files %}-->
+<!--                        <tr>-->
+<!--                            <td>{{ file.filename }}</td>-->
+<!--                            <td>{{ file.size }}</td>-->
+<!--                            <td>{{ file.upload_date }}</td>-->
+<!--                            <td>-->
+<!--                                <a href="{{ url_for('service.download_file', app_idx=service.app_idx, filename=file.filename) }}" class="btn btn-info btn-sm">-->
+<!--                                    <i class="fas fa-download"></i> 다운로드-->
+<!--                                </a>-->
+<!--                                <button class="btn btn-danger btn-sm delete-file" data-filename="{{ file.filename }}">-->
+<!--                                    <i class="fas fa-trash"></i> 삭제-->
+<!--                                </button>-->
+<!--                            </td>-->
+<!--                        </tr>-->
+<!--                        {% endfor %}-->
+<!--                        {% if not service_files %}-->
+<!--                        <tr>-->
+<!--                            <td colspan="4" class="text-center">등록된 파일이 없습니다.</td>-->
+<!--                        </tr>-->
+<!--                        {% endif %}-->
+<!--                    </tbody>-->
+<!--                </table>-->
+<!--            </div>-->
+<!--        </div>-->
+<!--    </div>-->
     <div class="card shadow mb-4">
         <div class="card-header py-3 d-flex justify-content-between align-items-center">
             <h6 class="m-0 font-weight-bold text-primary">연계 자산</h6>
-            <button class="btn btn-primary btn-sm" id="addAssetBtn">
-                <i class="fas fa-plus"></i> 자산 추가
-            </button>
+            <div>
+<!--                <a href="{{ url_for('service.download_link_template') }}" class="btn btn-info btn-sm">-->
+<!--                    <i class="fas fa-download"></i> 연계 템플릿-->
+<!--                </a>-->
+<!--                <button class="btn btn-warning btn-sm" data-toggle="modal" data-target="#uploadLinkModal">-->
+<!--                    <i class="fas fa-upload"></i> 일괄 연계-->
+<!--                </button>-->
+                <button class="btn btn-primary btn-sm" id="addAssetBtn">
+                    <i class="fas fa-plus"></i> 자산 추가
+                </button>
+            </div>
         </div>
         <div class="card-body">
             <div class="table-responsive">
@@ -87,7 +145,31 @@
         </div>
     </div>
 </div>
-
+<!-- 파일 업로드 모달 -->
+<div class="modal fade" id="uploadFileModal" tabindex="-1" role="dialog" aria-labelledby="uploadFileModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="uploadFileModalLabel">파일 업로드</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="fileUploadForm" action="{{ url_for('service.upload_file', app_idx=service.app_idx) }}" method="POST" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="file">파일 선택:</label>
+                        <input type="file" class="form-control-file" id="file" name="file" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" id="submitFileUpload">업로드</button>
+            </div>
+        </div>
+    </div>
+</div>
 <!-- 자산 검색 모달 -->
 <div class="modal fade" id="assetSearchModal" tabindex="-1" role="dialog" aria-labelledby="assetSearchModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">
@@ -130,7 +212,32 @@
         </div>
     </div>
 </div>
-
+<!-- 일괄 연계 업로드 모달 -->
+<div class="modal fade" id="uploadLinkModal" tabindex="-1" role="dialog" aria-labelledby="uploadLinkModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="uploadLinkModalLabel">서비스-자산 일괄 연계</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="linkUploadForm" action="{{ url_for('service.upload_links') }}" method="POST" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="linkFile">연계 파일 선택 (Excel):</label>
+                        <input type="file" class="form-control-file" id="linkFile" name="file" accept=".xlsx,.xls" required>
+                        <small class="form-text text-muted">연계 템플릿을 다운로드하여 작성 후 업로드하세요.</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" id="submitLinkUpload">업로드</button>
+            </div>
+        </div>
+    </div>
+</div>
 <script>
 $(document).ready(function() {
     // DataTable 초기화
@@ -139,6 +246,14 @@ $(document).ready(function() {
             url: '/static/js/korean.json'
         },
         order: [[0, 'asc']]
+    });
+
+    $('#serviceFilesTable').DataTable({
+        language: {
+            url: '/static/js/korean.json'
+        },
+        order: [[2, 'desc']],
+        pageLength: 10
     });
 
     // 자산 행 더블 클릭 이벤트
@@ -249,6 +364,40 @@ $(document).ready(function() {
                 },
                 error: function() {
                     alert('자산 연계 해제 중 오류가 발생했습니다.');
+                }
+            });
+        }
+    });
+    // 일괄 연계 업로드 제출 버튼 클릭 이벤트
+    $('#submitLinkUpload').on('click', function() {
+        if (!$('#linkFile').val()) {
+            alert('연계 파일을 선택해주세요.');
+            return;
+        }
+        $('#linkUploadForm').submit();
+    });
+
+    // 파일 삭제 버튼 클릭 이벤트
+    $(document).on('click', '.delete-file', function() {
+        var filename = $(this).data('filename');
+
+        if (confirm('정말로 이 파일을 삭제하시겠습니까?')) {
+            $.ajax({
+                url: "{{ url_for('service.delete_file', app_idx=service.app_idx) }}",
+                method: 'POST',
+                data: {
+                    filename: filename
+                },
+                success: function(response) {
+                    if (response.success) {
+                        alert('파일이 성공적으로 삭제되었습니다.');
+                        location.reload();  // 페이지 새로고침
+                    } else {
+                        alert('파일 삭제 실패: ' + response.message);
+                    }
+                },
+                error: function() {
+                    alert('파일 삭제 중 오류가 발생했습니다.');
                 }
             });
         }

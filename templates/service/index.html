@@ -1,0 +1,539 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0 text-gray-800">서비스 관리</h1>
+    </div>
+
+    <!-- 탭 네비게이션 -->
+    <ul class="nav nav-tabs" id="serviceManagementTabs" role="tablist">
+        <li class="nav-item">
+            <a class="nav-link active" id="service-tab" data-toggle="tab" href="#service-content" role="tab" aria-controls="service-content" aria-selected="true">
+                <i class="fas fa-server"></i> 서비스 관리
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" id="software-tab" data-toggle="tab" href="#software-content" role="tab" aria-controls="software-content" aria-selected="false">
+                <i class="fas fa-code"></i> 소프트웨어 관리
+            </a>
+        </li>
+    </ul>
+
+    <!-- 탭 컨텐츠 -->
+    <div class="tab-content" id="serviceManagementTabContent">
+        <!-- 서비스 관리 탭 -->
+        <div class="tab-pane fade show active" id="service-content" role="tabpanel" aria-labelledby="service-tab">
+            <div class="card shadow mb-4 mt-3">
+                <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 font-weight-bold text-primary">서비스 목록</h6>
+                    <div>
+                        <button class="btn btn-success mr-2" data-toggle="modal" data-target="#bulkUploadModal">
+                            <i class="fas fa-file-excel"></i> 일괄 추가/연계
+                        </button>
+                        <a href="{{ url_for('service.add_service') }}" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> 서비스 추가
+                        </a>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="serviceTable" width="100%" cellspacing="0">
+                            <thead>
+                                <tr>
+                                    <th>서비스 코드</th>
+                                    <th>서비스명</th>
+                                    <th>서비스 구분</th>
+                                    <th>서비스 도메인</th>
+                                    <th>APP 코드</th>
+                                    <th>중요도</th>
+                                    <th>관리</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for service in services %}
+                                <tr class="service-row" data-app-idx="{{ service.app_idx }}">
+                                    <td>{{ service.app_servicecode }}</td>
+                                    <td>{{ service.app_name }}</td>
+                                    <td>{{ service.app_group }}</td>
+                                    <td>{{ service.app_domain }}</td>
+                                    <td>{{ service.app_appcode }}</td>
+                                    <td>
+                                        <span class="badge badge-{% if service.app_importance == '핵심' %}danger{% elif service.app_importance == '중요' %}warning{% else %}secondary{% endif %}">
+                                            {{ service.app_importance }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-danger btn-sm delete-service" data-app-idx="{{ service.app_idx }}">
+                                            <i class="fas fa-trash"></i> 삭제
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                                {% if not services %}
+                                <tr>
+                                    <td colspan="7" class="text-center">등록된 서비스가 없습니다.</td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- 소프트웨어 관리 탭 -->
+        <div class="tab-pane fade" id="software-content" role="tabpanel" aria-labelledby="software-tab">
+            <div class="card shadow mb-4 mt-3">
+                <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 font-weight-bold text-primary">소프트웨어 목록</h6>
+                    <div>
+                        <button class="btn btn-success mr-2" id="bulkSoftwareBtn">
+                            <i class="fas fa-file-excel"></i> 일괄 등록
+                        </button>
+                        <button class="btn btn-primary" id="addSoftwareBtn">
+                            <i class="fas fa-plus"></i> 소프트웨어 등록
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- 검색 필터 -->
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <select class="form-control" id="softwareTypeFilter">
+                                <option value="">전체 종류</option>
+                                <option value="펌웨어">펌웨어</option>
+                                <option value="OS">OS</option>
+                                <option value="DBMS">DBMS</option>
+                                <option value="미들웨어">미들웨어</option>
+                                <option value="AP">AP</option>
+                                <option value="보안">보안</option>
+                                <option value="기타">기타</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <input type="text" class="form-control" id="softwareNameFilter" placeholder="소프트웨어명 검색">
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-control" id="softwareStatusFilter">
+                                <option value="">전체 상태</option>
+                                <option value="1">사용</option>
+                                <option value="0">미사용</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-secondary" id="resetSoftwareFilter">
+                                <i class="fas fa-undo"></i> 초기화
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="softwareTable" width="100%" cellspacing="0">
+                            <thead>
+                                <tr>
+                                    <th>종류</th>
+                                    <th>소프트웨어명</th>
+                                    <th>버전</th>
+                                    <th>EOS</th>
+                                    <th>EOSL</th>
+                                    <th>사용여부</th>
+                                    <th>메모</th>
+                                    <th>관리</th>
+                                </tr>
+                            </thead>
+                            <tbody id="softwareTableBody">
+                                <!-- 소프트웨어 데이터가 여기에 동적으로 로드됩니다 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 기존 서비스 관련 모달들 -->
+<!-- 삭제 확인 모달 -->
+<div class="modal fade" id="deleteServiceModal" tabindex="-1" role="dialog" aria-labelledby="deleteServiceModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteServiceModalLabel">서비스 삭제 확인</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                정말로 이 서비스를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                <form id="deleteServiceForm" method="POST">
+                    <button type="submit" class="btn btn-danger">삭제</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 일괄 업로드 모달 -->
+<div class="modal fade" id="bulkUploadModal" tabindex="-1" role="dialog" aria-labelledby="bulkUploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkUploadModalLabel">서비스 일괄 추가/연계</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs" id="bulkUploadTabs" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="service-upload-tab" data-toggle="tab" href="#service-upload" role="tab" aria-controls="service-upload" aria-selected="true">서비스 일괄 추가</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="link-upload-tab" data-toggle="tab" href="#link-upload" role="tab" aria-controls="link-upload" aria-selected="false">서비스-자산 일괄 연계</a>
+                    </li>
+                </ul>
+                <div class="tab-content mt-3" id="bulkUploadTabContent">
+                    <!-- 서비스 일괄 추가 탭 -->
+                    <div class="tab-pane fade show active" id="service-upload" role="tabpanel" aria-labelledby="service-upload-tab">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> 서비스 일괄 추가를 위한 엑셀 파일을 업로드하세요.
+                            <a href="{{ url_for('service.download_service_template') }}" class="alert-link">템플릿 다운로드</a>
+                        </div>
+                        <form action="{{ url_for('service.upload_services') }}" method="POST" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="serviceFile">엑셀 파일 선택</label>
+                                <input type="file" class="form-control-file" id="serviceFile" name="file" accept=".xlsx, .xls">
+                                <small class="form-text text-muted">Excel 파일만 업로드 가능합니다 (.xlsx, .xls)</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">업로드 및 처리</button>
+                        </form>
+                    </div>
+
+                    <!-- 서비스-자산 일괄 연계 탭 -->
+                    <div class="tab-pane fade" id="link-upload" role="tabpanel" aria-labelledby="link-upload-tab">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> 서비스와 자산을 일괄 연계하기 위한 엑셀 파일을 업로드하세요.
+                            <a href="{{ url_for('service.download_link_template') }}" class="alert-link">템플릿 다운로드</a>
+                        </div>
+                        <form action="{{ url_for('service.upload_links') }}" method="POST" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="linkFile">엑셀 파일 선택</label>
+                                <input type="file" class="form-control-file" id="linkFile" name="file" accept=".xlsx, .xls">
+                                <small class="form-text text-muted">Excel 파일만 업로드 가능합니다 (.xlsx, .xls)</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">업로드 및 처리</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 소프트웨어 등록 모달 -->
+<div class="modal fade" id="addSoftwareModal" tabindex="-1" role="dialog" aria-labelledby="addSoftwareModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addSoftwareModalLabel">소프트웨어 등록</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="addSoftwareForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="sw_type">종류 <span class="text-danger">*</span></label>
+                                <select class="form-control" id="sw_type" name="sw_type" required>
+                                    <option value="">선택하세요</option>
+                                    <option value="펌웨어">펌웨어</option>
+                                    <option value="OS">OS</option>
+                                    <option value="DBMS">DBMS</option>
+                                    <option value="미들웨어">미들웨어</option>
+                                    <option value="AP">AP</option>
+                                    <option value="보안">보안</option>
+                                    <option value="기타">기타</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="sw_name">소프트웨어명 <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="sw_name" name="sw_name" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="sw_version">버전</label>
+                                <input type="text" class="form-control" id="sw_version" name="sw_version">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="sw_status">사용여부</label>
+                                <select class="form-control" id="sw_status" name="sw_status">
+                                    <option value="1">사용</option>
+                                    <option value="0">미사용</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="sw_eos">EOS</label>
+                                <input type="date" class="form-control" id="sw_eos" name="sw_eos">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="sw_eosl">EOSL</label>
+                                <input type="date" class="form-control" id="sw_eosl" name="sw_eosl">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="sw_memo">메모</label>
+                        <textarea class="form-control" id="sw_memo" name="sw_memo" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" id="saveSoftwareBtn">저장</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 소프트웨어 일괄 등록 모달 -->
+<div class="modal fade" id="bulkSoftwareModal" tabindex="-1" role="dialog" aria-labelledby="bulkSoftwareModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkSoftwareModalLabel">소프트웨어 일괄 등록</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> 소프트웨어 일괄 등록을 위한 엑셀 파일을 업로드하세요.
+                    <a href="{{ url_for('service.download_software_template') }}" class="alert-link">템플릿 다운로드</a>
+                </div>
+                <form id="bulkSoftwareForm" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="softwareFile">엑셀 파일 선택</label>
+                        <input type="file" class="form-control-file" id="softwareFile" name="file" accept=".xlsx, .xls">
+                        <small class="form-text text-muted">Excel 파일만 업로드 가능합니다 (.xlsx, .xls)</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" id="uploadSoftwareBtn">업로드 및 처리</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    // 서비스 DataTable 초기화
+    $('#serviceTable').DataTable({
+        language: {
+            url: '/static/js/korean.json'
+        },
+        order: [[0, 'asc']]
+    });
+
+    // 소프트웨어 DataTable 초기화
+    var softwareTable = $('#softwareTable').DataTable({
+        language: {
+            url: '/static/js/korean.json'
+        },
+        order: [[0, 'asc']],
+        processing: true,
+        serverSide: false,
+        ajax: {
+            url: "{{ url_for('service.get_software_list') }}",
+            type: 'GET',
+            data: function(d) {
+                d.type_filter = $('#softwareTypeFilter').val();
+                d.name_filter = $('#softwareNameFilter').val();
+                d.status_filter = $('#softwareStatusFilter').val();
+            },
+            dataSrc: 'data'
+        },
+        columns: [
+            { data: 'type_name' },
+            { data: 'sw_name' },
+            { data: 'sw_version' },
+            { data: 'sw_eos' },
+            { data: 'sw_eosl' },
+            {
+                data: 'sw_status',
+                render: function(data, type, row) {
+                    return data == 1 ? '<span class="badge badge-success">사용</span>' : '<span class="badge badge-secondary">미사용</span>';
+                }
+            },
+            {
+                data: 'sw_memo',
+                render: function(data, type, row) {
+                    return data ? (data.length > 50 ? data.substring(0, 50) + '...' : data) : '';
+                }
+            },
+            {
+                data: null,
+                render: function(data, type, row) {
+                    return '<button class="btn btn-danger btn-sm delete-software" data-sw-idx="' + row.sw_idx + '">' +
+                           '<i class="fas fa-trash"></i> 삭제</button>';
+                }
+            }
+        ]
+    });
+
+    // 탭 전환 시 소프트웨어 테이블 새로고침
+    $('#software-tab').on('shown.bs.tab', function() {
+        softwareTable.ajax.reload();
+    });
+
+    // 서비스 행 더블 클릭 이벤트
+    $(document).on('dblclick', '.service-row', function() {
+        var appIdx = $(this).data('app-idx');
+        window.location.href = "{{ url_for('service.edit_service', app_idx=0) }}".replace('0', appIdx);
+    });
+
+    // 소프트웨어 행 더블 클릭 이벤트
+    $('#softwareTable tbody').on('dblclick', 'tr', function() {
+        var data = softwareTable.row(this).data();
+        if (data) {
+            window.location.href = "{{ url_for('service.edit_software', sw_idx=0) }}".replace('0', data.sw_idx);
+        }
+    });
+
+    // 서비스 삭제 버튼 클릭 이벤트
+    $('.delete-service').on('click', function(e) {
+        e.stopPropagation();
+        var appIdx = $(this).data('app-idx');
+        $('#deleteServiceForm').attr('action', "{{ url_for('service.delete_service', app_idx=0) }}".replace('0', appIdx));
+        $('#deleteServiceModal').modal('show');
+    });
+
+    // 소프트웨어 등록 버튼
+    $('#addSoftwareBtn').on('click', function() {
+        $('#addSoftwareForm')[0].reset();
+        $('#addSoftwareModalLabel').text('소프트웨어 등록');
+        $('#addSoftwareModal').modal('show');
+    });
+
+    // 소프트웨어 저장
+    $('#saveSoftwareBtn').on('click', function() {
+        var formData = new FormData($('#addSoftwareForm')[0]);
+
+        $.ajax({
+            url: "{{ url_for('service.add_software') }}",
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                if (response.success) {
+                    $('#addSoftwareModal').modal('hide');
+                    softwareTable.ajax.reload();
+                    alert(response.message);
+                } else {
+                    alert('오류: ' + response.message);
+                }
+            },
+            error: function() {
+                alert('서버 오류가 발생했습니다.');
+            }
+        });
+    });
+
+    // 소프트웨어 일괄 등록 버튼
+    $('#bulkSoftwareBtn').on('click', function() {
+        $('#bulkSoftwareModal').modal('show');
+    });
+
+    // 소프트웨어 일괄 업로드
+    $('#uploadSoftwareBtn').on('click', function() {
+        var formData = new FormData($('#bulkSoftwareForm')[0]);
+
+        if (!$('#softwareFile').val()) {
+            alert('파일을 선택해주세요.');
+            return;
+        }
+
+        $.ajax({
+            url: "{{ url_for('service.upload_software') }}",
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                if (response.success) {
+                    $('#bulkSoftwareModal').modal('hide');
+                    softwareTable.ajax.reload();
+                    alert(response.message);
+                } else {
+                    alert('오류: ' + response.message);
+                }
+            },
+            error: function() {
+                alert('서버 오류가 발생했습니다.');
+            }
+        });
+    });
+
+    // 소프트웨어 삭제
+    $('#softwareTable tbody').on('click', '.delete-software', function(e) {
+        e.stopPropagation();
+        var swIdx = $(this).data('sw-idx');
+
+        if (confirm('정말로 이 소프트웨어를 삭제하시겠습니까?')) {
+            $.ajax({
+                url: "{{ url_for('service.delete_software') }}",
+                type: 'POST',
+                data: { sw_idx: swIdx },
+                success: function(response) {
+                    if (response.success) {
+                        softwareTable.ajax.reload();
+                        alert(response.message);
+                    } else {
+                        alert('오류: ' + response.message);
+                    }
+                },
+                error: function() {
+                    alert('서버 오류가 발생했습니다.');
+                }
+            });
+        }
+    });
+
+    // 소프트웨어 필터링
+    $('#softwareTypeFilter, #softwareNameFilter, #softwareStatusFilter').on('change keyup', function() {
+        softwareTable.ajax.reload();
+    });
+
+    // 소프트웨어 필터 초기화
+    $('#resetSoftwareFilter').on('click', function() {
+        $('#softwareTypeFilter').val('');
+        $('#softwareNameFilter').val('');
+        $('#softwareStatusFilter').val('');
+        softwareTable.ajax.reload();
+    });
+});
+</script>
+{% endblock %}

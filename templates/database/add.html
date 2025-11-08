@@ -1,0 +1,239 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid">
+
+    <!-- header -->
+    <div class="d-flex justify-content-between align-items-center">
+        <h1 class="h4 text-gray-800">데이터베이스 추가</h1>
+    </div>
+
+    <!-- body -->
+    <div class="container my-4">
+        <div class="row g-3">
+            <!-- DB 기본 정보 -->
+            <div class="col-md-6">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-primary text-white">DB 기본 정보</div>
+        
+                    <div class="card-body">
+                        <form action="{{ url_for('database.add_database')}}" method="POST">
+                            
+                            <div class="mb-4">
+                                <div class="row mb-2 align-items-center">
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="service_name" class="col-sm-4 col-form-label">서비스명</label>
+                                    <div class="col-sm-8">
+                                        <input id="service_name" name="service_name" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="oper" class="col-sm-4 col-form-label">운영방식</label>
+                                    <div class="col-sm-8">
+                                        <select class="form-control" id="oper" name="oper">
+                                            <option value="0">운영</option>
+                                            <option value="1">검증</option>
+                                            <option value="2">개발</option>
+                                            <option value="5">프로젝트</option>
+                                            <option value="4">DR</option>
+                                            <option value="3">테스트</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="ip" class="col-sm-4 col-form-label">IP</label>
+                                    <div class="col-sm-8">
+                                        <input id="ip" name="ip" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="port" class="col-sm-4 col-form-label">PORT</label>
+                                    <div class="col-sm-8">
+                                        <input id="port" name="port" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="dbsafer_port" class="col-sm-4 col-form-label">DBSafer PORT</label>
+                                    <div class="col-sm-8">
+                                        <input id="dbsafer_port" name="dbsafer_port" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="hostname" class="col-sm-4 col-form-label">호스트명</label>
+                                    <div class="col-sm-8">
+                                        <input id="hostname" name="hostname" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="instance" class="col-sm-4 col-form-label">인스턴스명</label>
+                                    <div class="col-sm-8">
+                                        <input id="instance" name="instance" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="db_name" class="col-sm-4 col-form-label">DB명</label>
+                                    <div class="col-sm-8">
+                                        <input id="db_name" name="db_name" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="dbms" class="col-sm-4 col-form-label">DBMS</label>
+                                    <div class="col-sm-8">
+                                        <select class="form-control" id="dbms" name="dbms">
+                                            <option value="">--선택--</option>
+                                            <option value="Oracle">Oracle</option>
+                                            <option value="MySQL">MySQL</option>
+                                            <option value="SQLServer">SQLServer</option>
+                                            <option value="Tibero">Tibero</option>
+                                            <option value="PostgreSQL">PostgreSQL</option>
+                                            <option value="Sybase">Sybase</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="db_version" class="col-sm-4 col-form-label">버전</label>
+                                    <div class="col-sm-8">
+                                        <select class="form-control" id="db_version" name="db_version">
+                                            <option value="" selected>--선택--</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="mb-3">
+                                <div class="row mb-2 align-items-center">
+                                    <label for="avl" class="col-sm-4 col-form-label">고가용성 방법</label>
+                                    <div class="col-sm-8">
+                                        <input id="avl" name="avl" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="characterset" class="col-sm-4 col-form-label">CharacterSet</label>
+                                    <div class="col-sm-8">
+                                        <input id="characterset" name="characterset" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="primary_owner" class="col-sm-4 col-form-label">담당자(정)</label>
+                                    <div class="col-sm-8">
+                                        <input id="primary_owner" name="primary_owner" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                                <div class="row mb-2 align-items-center">
+                                    <label for="secondary_owner" class="col-sm-4 col-form-label">담당자(부)</label>
+                                    <div class="col-sm-8">
+                                        <input id="secondary_owner" name="secondary_owner" type="text" class="form-control" value="">
+                                    </div>
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="mb-3">
+                                <div class="row mb-2 align-items-center">
+                                    <label for="memo" class="col-sm-4 col-form-label">메모</label>
+                                    <div class="col-sm-8">
+                                        <textarea id="memo" name="memo" class="form-control" rows="3" placeholder="메모를 입력하세요..."></textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary w-100">등록</button>
+                        </form>
+
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6 d-flex flex-column gap-3">
+
+                <!-- 서버 정보 -->
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header bg-secondary text-white">서버 정보</div>
+                    <div class="card-body">
+                        <ul id="server_info" class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between">
+                                <span class="fw-bold">호스트명</span>
+                                <a id="server_hostname" href=""></a>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <span class="fw-bold">IP</span>
+                                <span id="server_ip"></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <span class="fw-bold">OS</span>
+                                <span id="server_state"></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <span class="fw-bold">위치</span>
+                                <span id="server_center"></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <span class="fw-bold">상면번호</span>
+                                <span id="server_loc1"></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <span class="fw-bold">상단번호</span>
+                                <span id="server_loc2"></span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const dbmsSelect = document.getElementById('dbms');
+const versionSelect = document.getElementById('db_version');
+
+dbmsSelect.addEventListener('change', () => {
+    const dbms = dbmsSelect.value;
+
+    fetch(`/database/version?dbms=${dbms}`)
+      .then(response => response.json())
+      .then(data => {
+          versionSelect.innerHTML = '';
+          const defaultOption = document.createElement('option');
+          defaultOption.value = '';
+          defaultOption.text = '--선택--';
+          versionSelect.appendChild(defaultOption);
+
+          data.forEach(item => {
+            const option = document.createElement('option');
+            option.value = item.sw_idx;
+            option.text = `${item.sw_version}`;
+            versionSelect.appendChild(option);
+        });
+      })
+      .catch(err => console.error('버전 조회 오류:', err));
+});
+
+
+const hostnameInput = document.getElementById('hostname')
+
+hostnameInput.addEventListener('change', () => {
+
+    fetch(`/database/server?hostname=${hostnameInput.value}`)
+      .then(response => response.json())
+      .then(data => {
+        document.querySelector("#server_hostname").textContent = data.hostname;
+        document.querySelector("#server_hostname").href = `/edit/${data.pnum}`;
+        document.querySelector("#server_ip").textContent = data.ip;
+        document.querySelector("#server_state").textContent = data.state;
+        document.querySelector("#server_center").textContent = data.center;
+        document.querySelector("#server_loc1").textContent = data.loc1;
+        document.querySelector("#server_loc2").textContent = data.loc2;
+      })
+      .catch(err => console.error('서버 조회 오류:', err));
+})
+
+document.addEventListener('keydown', function(event) {
+  if (event.keyCode === 13) {
+    event.preventDefault();
+  };
+}, true);
+
+</script>
+{% endblock %}

@@ -1,0 +1,1109 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3>백업 스케줄 관리</h3>
+    </div>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5><i class="fas fa-list"></i> 백업 스케줄 목록</h5>
+            <div>
+                <button class="btn btn-info btn-sm mr-2" onclick="openColumnSelectModal()">
+                    <i class="fas fa-columns"></i> 열선택
+                </button>
+                <button class="btn btn-warning btn-sm mr-2" onclick="openBulkModal()">
+                    <i class="fas fa-file-upload"></i> 일괄등록/변경
+                </button>
+                <button class="btn btn-primary btn-sm mr-2" onclick="openAddScheduleModal()">
+                    <i class="fas fa-plus"></i> 등록
+                </button>
+                <button class="btn btn-danger btn-sm mr-2" onclick="bulkDelete()">
+                    <i class="fas fa-trash"></i> 삭제
+                </button>
+                <button class="btn btn-success btn-sm" onclick="exportSchedules()">
+                    <i class="fas fa-download"></i> 내려받기
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table id="scheduleTable" class="table table-striped table-bordered">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="selectAllSchedules"></th>
+                            {% for column in columns %}
+                            <th class="column-{{ column.key }}" {% if not column.visible %}style="display: none;"{% endif %}>{{ column.name }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for schedule in schedules %}
+                        <tr ondblclick="showScheduleDetailById({{ schedule.id }})" style="cursor: pointer;">
+                            <td><input type="checkbox" class="schedule-checkbox" value="{{ schedule.id }}"></td>
+                            {% for column in columns %}
+                            <td class="column-{{ column.key }}" {% if not column.visible %}style="display: none;"{% endif %}>
+                                {{ schedule[column.key] if schedule[column.key] else '-' }}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="columnSelectModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">표시할 열 선택</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    {% for column in columns %}
+                    <div class="col-md-6 mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input column-check" type="checkbox" value="{{ column.key }}" id="col-{{ column.key }}" {% if column.visible %}checked{% endif %}>
+                            <label class="form-check-label" for="col-{{ column.key }}">
+                                {{ column.name }}
+                            </label>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="applyColumnSelection()">적용</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="bulkModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">일괄등록/변경</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs" id="bulkUploadTabs" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="schedule-bulk-tab" data-toggle="tab" href="#schedule-bulk" role="tab">스케줄 일괄등록/변경</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="asset-link-tab" data-toggle="tab" href="#asset-link" role="tab">스케줄-자산 일괄 연계</a>
+                    </li>
+                </ul>
+
+                <div class="tab-content mt-3" id="bulkUploadTabContent">
+                    <div class="tab-pane fade show active" id="schedule-bulk" role="tabpanel">
+                        <h6>일괄등록 양식 다운로드</h6>
+                        <p>새로운 스케줄을 일괄로 등록할 때 사용합니다.</p>
+                        <a href="{{ url_for('backup.download_schedule_template') }}" class="btn btn-info mb-3">
+                            <i class="fas fa-download"></i> 일괄등록 양식 다운로드
+                        </a>
+
+                        <hr>
+
+                        <h6>일괄변경 양식 다운로드</h6>
+                        <p>현재 등록된 스케줄을 수정할 때 사용합니다. (고유번호 포함)</p>
+                        <a href="{{ url_for('backup.download_schedule_bulk_change_template') }}" class="btn btn-warning mb-3">
+                            <i class="fas fa-download"></i> 일괄변경 양식 다운로드
+                        </a>
+
+                        <hr>
+
+                        <h6>Excel 파일 업로드</h6>
+                        <form id="bulkUploadForm" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label>업로드 타입</label>
+                                <select class="form-control" name="upload_type" required>
+                                    <option value="insert">일괄등록 (신규 추가)</option>
+                                    <option value="update">일괄변경 (기존 데이터 수정)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Excel 파일</label>
+                                <input type="file" class="form-control-file" name="file" accept=".xlsx,.xls" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">업로드</button>
+                        </form>
+                    </div>
+
+                    <div class="tab-pane fade" id="asset-link" role="tabpanel">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> 스케줄과 자산을 일괄 연계하기 위한 엑셀 파일을 업로드하세요.
+                        </div>
+
+                        <h6>일괄 연계 양식 다운로드</h6>
+                        <p>스케줄 고유 ID와 자산 ID를 매핑하여 일괄 연계합니다.</p>
+                        <a href="{{ url_for('backup.download_schedule_asset_link_template') }}" class="btn btn-info mb-3">
+                            <i class="fas fa-download"></i> 일괄 연계 양식 다운로드
+                        </a>
+
+                        <hr>
+
+                        <h6>Excel 파일 업로드</h6>
+                        <form id="bulkAssetLinkForm" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label>Excel 파일</label>
+                                <input type="file" class="form-control-file" name="file" accept=".xlsx,.xls" required>
+                                <small class="form-text text-muted">
+                                    파일 형식: 스케줄 고유 ID | 자산 번호(pnum)
+                                </small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">업로드</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addScheduleModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">백업 스케줄 등록</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <form id="addScheduleForm">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>기본 정보</h6>
+                            <div class="form-group">
+                                <label>구분</label>
+                                <input type="text" class="form-control" name="category">
+                            </div>
+                            <div class="form-group">
+                                <label>업무명</label>
+                                <input type="text" class="form-control" name="business_name">
+                            </div>
+                            <div class="form-group">
+                                <label>호스트명 *</label>
+                                <input type="text" class="form-control" name="hostname" required>
+                            </div>
+                            <div class="form-group">
+                                <label>IP주소</label>
+                                <input type="text" class="form-control" name="ip_address">
+                            </div>
+                            <div class="form-group">
+                                <label>도입년도</label>
+                                <input type="number" class="form-control" name="introduction_year">
+                            </div>
+                            <div class="form-group">
+                                <label>벤더</label>
+                                <input type="text" class="form-control" name="vendor">
+                            </div>
+                            <div class="form-group">
+                                <label>모델명</label>
+                                <input type="text" class="form-control" name="model_name">
+                            </div>
+                            <div class="form-group">
+                                <label>OS</label>
+                                <input type="text" class="form-control" name="os">
+                            </div>
+                            <div class="form-group">
+                                <label>OS version</label>
+                                <input type="text" class="form-control" name="os_version">
+                            </div>
+                            <div class="form-group">
+                                <label>설치 장소</label>
+                                <input type="text" class="form-control" name="installation_location">
+                            </div>
+                            <div class="form-group">
+                                <label>이중화 구성</label>
+                                <input type="text" class="form-control" name="redundancy_config">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>백업 정보</h6>
+                            <div class="form-group">
+                                <label>백업 방식</label>
+                                <input type="text" class="form-control" name="backup_method">
+                            </div>
+                            <div class="form-group">
+                                <label>보관 주기</label>
+                                <input type="text" class="form-control" name="retention_period">
+                            </div>
+                            <div class="form-group">
+                                <label>소산 주기</label>
+                                <input type="text" class="form-control" name="offsite_cycle">
+                            </div>
+                            <div class="form-group">
+                                <label>소산 장소</label>
+                                <input type="text" class="form-control" name="offsite_location">
+                            </div>
+                            <div class="form-group">
+                                <label>소산 장비</label>
+                                <input type="text" class="form-control" name="offsite_equipment">
+                            </div>
+                            <div class="form-group">
+                                <label>소산 보관주기</label>
+                                <input type="text" class="form-control" name="offsite_retention">
+                            </div>
+                            <div class="form-group">
+                                <label>백업 대상</label>
+                                <textarea class="form-control" name="backup_target" rows="2"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>저장 매체</label>
+                                <input type="text" class="form-control" name="storage_media">
+                            </div>
+                            <div class="form-group">
+                                <label>백업 정책명 *</label>
+                                <input type="text" class="form-control" name="backup_policy" required>
+                            </div>
+                            <div class="form-group">
+                                <label>백업 스케줄명 *</label>
+                                <input type="text" class="form-control" name="backup_schedule" required>
+                            </div>
+                             <!-- Removed backup end time field from add modal -->
+                            <div class="form-group">
+                                <label>백업 시작시간 설정 방식</label>
+                                <select class="form-control" id="addTimeMode" onchange="toggleAddTimeMode()">
+                                    <option value="specific">지정 (특정 날짜 및 시간)</option>
+                                    <option value="recurring">반복 (요일별 시간)</option>
+                                </select>
+                            </div>
+
+                             <!-- Specific time mode -->
+                            <div id="addSpecificTimeSection">
+                                <div class="form-group">
+                                    <label>백업 날짜 및 시간</label>
+                                    <input type="datetime-local" class="form-control" id="addSpecificDateTime">
+                                </div>
+                            </div>
+
+                             <!-- Recurring time mode -->
+                            <div id="addRecurringTimeSection" style="display: none;">
+                                <div class="form-group">
+                                    <label>요일 선택</label>
+                                    <div class="d-flex flex-wrap">
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input add-day-check" type="checkbox" value="MON" id="addMon">
+                                            <label class="form-check-label" for="addMon">월</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input add-day-check" type="checkbox" value="TUE" id="addTue">
+                                            <label class="form-check-label" for="addTue">화</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input add-day-check" type="checkbox" value="WED" id="addWed">
+                                            <label class="form-check-label" for="addWed">수</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input add-day-check" type="checkbox" value="THU" id="addThu">
+                                            <label class="form-check-label" for="addThu">목</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input add-day-check" type="checkbox" value="FRI" id="addFri">
+                                            <label class="form-check-label" for="addFri">금</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input add-day-check" type="checkbox" value="SAT" id="addSat">
+                                            <label class="form-check-label" for="addSat">토</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input add-day-check" type="checkbox" value="SUN" id="addSun">
+                                            <label class="form-check-label" for="addSun">일</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>시간 설정 <small class="text-muted">(여러 시간 입력 가능, 쉼표로 구분)</small></label>
+                                    <input type="text" class="form-control" id="addRecurringTimes" placeholder="예: 00:20, 01:20, 02:20">
+                                    <small class="form-text text-muted">형식: HH:MM (예: 00:20, 01:20, 02:20)</small>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>DBMS</label>
+                                <input type="text" class="form-control" name="dbms">
+                            </div>
+                            <div class="form-group">
+                                <label>타겟 파일시스템</label>
+                                <textarea class="form-control" name="target_filesystem" rows="2"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>메모</label>
+                                <textarea class="form-control" name="memo" rows="2"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+                    <h6>자산 연계</h6>
+                    <div class="row">
+                        <div class="col-12">
+                            <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="openAssetSearchModal('add')">
+                                <i class="fas fa-search"></i> 자산 검색 및 연계
+                            </button>
+                            <div id="addLinkedAssetInfo" class="alert alert-info" style="display: none;">
+                                <strong>연계된 자산:</strong>
+                                <div id="addLinkedAssetDetails"></div>
+                                <button type="button" class="btn btn-sm btn-danger mt-2" onclick="clearLinkedAsset('add')">
+                                    <i class="fas fa-unlink"></i> 연계 해제
+                                </button>
+                            </div>
+                            <input type="hidden" id="addLinkedAssetPnum" name="linked_asset_pnum">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary mt-3">등록</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editScheduleModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">백업 스케줄 수정</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <form id="editScheduleForm">
+                    <input type="hidden" id="editScheduleId" name="schedule_id">
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>기본 정보</h6>
+                            <div class="form-group">
+                                <label>고유번호 <small class="text-muted">(시스템 생성)</small></label>
+                                <input type="text" class="form-control" id="editUniqueId" name="unique_id" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="form-group">
+                                <label>구분</label>
+                                <input type="text" class="form-control" id="editCategory" name="category">
+                            </div>
+                            <div class="form-group">
+                                <label>업무명</label>
+                                <input type="text" class="form-control" id="editBusinessName" name="business_name">
+                            </div>
+                            <div class="form-group">
+                                <label>호스트명 *</label>
+                                <input type="text" class="form-control" id="editHostname" name="hostname" required>
+                            </div>
+                            <div class="form-group">
+                                <label>IP주소</label>
+                                <input type="text" class="form-control" id="editIpAddress" name="ip_address">
+                            </div>
+                            <div class="form-group">
+                                <label>도입년도</label>
+                                <input type="number" class="form-control" id="editIntroductionYear" name="introduction_year">
+                            </div>
+                            <div class="form-group">
+                                <label>벤더</label>
+                                <input type="text" class="form-control" id="editVendor" name="vendor">
+                            </div>
+                            <div class="form-group">
+                                <label>모델명</label>
+                                <input type="text" class="form-control" id="editModelName" name="model_name">
+                            </div>
+                            <div class="form-group">
+                                <label>OS</label>
+                                <input type="text" class="form-control" id="editOs" name="os">
+                            </div>
+                            <div class="form-group">
+                                <label>OS version</label>
+                                <input type="text" class="form-control" id="editOsVersion" name="os_version">
+                            </div>
+                            <div class="form-group">
+                                <label>설치 장소</label>
+                                <input type="text" class="form-control" id="editInstallationLocation" name="installation_location">
+                            </div>
+                            <div class="form-group">
+                                <label>이중화 구성</label>
+                                <input type="text" class="form-control" id="editRedundancyConfig" name="redundancy_config">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>백업 정보</h6>
+                            <div class="form-group">
+                                <label>백업 방식</label>
+                                <input type="text" class="form-control" id="editBackupMethod" name="backup_method">
+                            </div>
+                            <div class="form-group">
+                                <label>보관 주기</label>
+                                <input type="text" class="form-control" id="editRetentionPeriod" name="retention_period">
+                            </div>
+                            <div class="form-group">
+                                <label>소산 주기</label>
+                                <input type="text" class="form-control" id="editOffsiteCycle" name="offsite_cycle">
+                            </div>
+                            <div class="form-group">
+                                <label>소산 장소</label>
+                                <input type="text" class="form-control" id="editOffsiteLocation" name="offsite_location">
+                            </div>
+                            <div class="form-group">
+                                <label>소산 장비</label>
+                                <input type="text" class="form-control" id="editOffsiteEquipment" name="offsite_equipment">
+                            </div>
+                            <div class="form-group">
+                                <label>소산 보관주기</label>
+                                <input type="text" class="form-control" id="editOffsiteRetention" name="offsite_retention">
+                            </div>
+                            <div class="form-group">
+                                <label>백업 대상</label>
+                                <textarea class="form-control" id="editBackupTarget" name="backup_target" rows="2"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>저장 매체</label>
+                                <input type="text" class="form-control" id="editStorageMedia" name="storage_media">
+                            </div>
+                            <div class="form-group">
+                                <label>백업 정책명 *</label>
+                                <input type="text" class="form-control" id="editBackupPolicy" name="backup_policy" required>
+                            </div>
+                            <div class="form-group">
+                                <label>백업 스케줄명 *</label>
+                                <input type="text" class="form-control" id="editBackupSchedule" name="backup_schedule" required>
+                            </div>
+                             <!-- Removed backup end time field from edit modal -->
+                            <div class="form-group">
+                                <label>백업 시작시간 설정 방식</label>
+                                <select class="form-control" id="editTimeMode" onchange="toggleEditTimeMode()">
+                                    <option value="specific">지정 (특정 날짜 및 시간)</option>
+                                    <option value="recurring">반복 (요일별 시간)</option>
+                                </select>
+                            </div>
+
+                             <!-- Specific time mode -->
+                            <div id="editSpecificTimeSection">
+                                <div class="form-group">
+                                    <label>백업 날짜 및 시간</label>
+                                    <input type="datetime-local" class="form-control" id="editSpecificDateTime">
+                                </div>
+                            </div>
+
+                             <!-- Recurring time mode -->
+                            <div id="editRecurringTimeSection" style="display: none;">
+                                <div class="form-group">
+                                    <label>요일 선택</label>
+                                    <div class="d-flex flex-wrap">
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input edit-day-check" type="checkbox" value="MON" id="editMon">
+                                            <label class="form-check-label" for="editMon">월</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input edit-day-check" type="checkbox" value="TUE" id="editTue">
+                                            <label class="form-check-label" for="editTue">화</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input edit-day-check" type="checkbox" value="WED" id="editWed">
+                                            <label class="form-check-label" for="editWed">수</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input edit-day-check" type="checkbox" value="THU" id="editThu">
+                                            <label class="form-check-label" for="editThu">목</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input edit-day-check" type="checkbox" value="FRI" id="editFri">
+                                            <label class="form-check-label" for="editFri">금</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input edit-day-check" type="checkbox" value="SAT" id="editSat">
+                                            <label class="form-check-label" for="editSat">토</label>
+                                        </div>
+                                        <div class="form-check mr-3">
+                                            <input class="form-check-input edit-day-check" type="checkbox" value="SUN" id="editSun">
+                                            <label class="form-check-label" for="editSun">일</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>시간 설정 <small class="text-muted">(여러 시간 입력 가능, 쉼표로 구분)</small></label>
+                                    <input type="text" class="form-control" id="editRecurringTimes" placeholder="예: 00:20, 01:20, 02:20">
+                                    <small class="form-text text-muted">형식: HH:MM (예: 00:20, 01:20, 02:20)</small>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>DBMS</label>
+                                <input type="text" class="form-control" id="editDbms" name="dbms">
+                            </div>
+                            <div class="form-group">
+                                <label>타겟 파일시스템</label>
+                                <textarea class="form-control" id="editTargetFilesystem" name="target_filesystem" rows="2"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>메모</label>
+                                <textarea class="form-control" id="editMemo" name="memo" rows="2"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+                    <h6>자산 연계</h6>
+                    <div class="row">
+                        <div class="col-12">
+                            <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="openAssetSearchModal('edit')">
+                                <i class="fas fa-search"></i> 자산 검색 및 연계
+                            </button>
+                            <div id="editLinkedAssetInfo" class="alert alert-info" style="display: none;">
+                                <strong>연계된 자산:</strong>
+                                <div id="editLinkedAssetDetails"></div>
+                                <button type="button" class="btn btn-sm btn-danger mt-2" onclick="clearLinkedAsset('edit')">
+                                    <i class="fas fa-unlink"></i> 연계 해제
+                                </button>
+                            </div>
+                            <input type="hidden" id="editLinkedAssetPnum" name="linked_asset_pnum">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary mt-3">저장</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="assetSearchModal" tabindex="-1" data-backdrop="static">
+    <div class="modal-dialog modal-xl" style="z-index: 1060;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">자산 검색 및 연계</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="assetSearchTerm">검색어 (서버명, 호스트명, IP):</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="assetSearchTerm" placeholder="검색어를 입력하세요">
+                        <div class="input-group-append">
+                            <button class="btn btn-outline-secondary" type="button" onclick="searchAssets()">
+                                <i class="fas fa-search"></i> 검색
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div id="assetSearchResults" class="mt-3">
+                    <table class="table table-striped table-hover" id="assetSearchTable">
+                        <thead>
+                            <tr>
+                                <th>선택</th>
+                                <th>서버명</th>
+                                <th>호스트명</th>
+                                <th>IP 주소</th>
+                                <th>OS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="assetSearchResultsBody">
+                            <tr><td colspan="5" class="text-center">검색어를 입력하고 검색 버튼을 클릭하세요.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+                <button type="button" class="btn btn-primary" onclick="selectAsset()">
+                    <i class="fas fa-check"></i> 선택
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    // DataTable 초기화
+    $('#scheduleTable').DataTable({
+        "order": [[ 1, "asc" ]],
+        "pageLength": 25,
+        "language": {
+            "url": "{{ url_for('static', filename='js/korean.json') }}"
+        }
+    });
+
+    // 전체 선택 체크박스
+    $('#selectAllSchedules').on('change', function() {
+        $('.schedule-checkbox').prop('checked', this.checked);
+    });
+
+    // 스케줄 등록 폼 제출
+    $('#addScheduleForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+        const data = Object.fromEntries(formData);
+
+        const timeMode = $('#addTimeMode').val();
+        let backupTimes = '';
+
+        if (timeMode === 'specific') {
+            const datetime = $('#addSpecificDateTime').val();
+            if (datetime) {
+                backupTimes = `지정 ${datetime}`;
+            }
+        } else {
+            const selectedDays = [];
+            $('.add-day-check:checked').each(function() {
+                selectedDays.push($(this).val());
+            });
+
+            const times = $('#addRecurringTimes').val().split(',').map(t => t.trim()).filter(t => t);
+
+            if (selectedDays.length > 0 && times.length > 0) {
+                const dayNames = {
+                    'MON': '월요일',
+                    'TUE': '화요일',
+                    'WED': '수요일',
+                    'THU': '목요일',
+                    'FRI': '금요일',
+                    'SAT': '토요일',
+                    'SUN': '일요일'
+                };
+
+                const timeEntries = [];
+                selectedDays.forEach(day => {
+                    times.forEach(time => {
+                        timeEntries.push(`${dayNames[day]} ${time}`);
+                    });
+                });
+                backupTimes = timeEntries.join(', ');
+            }
+        }
+
+        data.backup_times = backupTimes;
+
+        $.ajax({
+            url: '/backup/api/schedule',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                alert('스케줄이 등록되었습니다.');
+                location.reload();
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    });
+
+    // 일괄 업로드 폼 제출
+    $('#bulkUploadForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+
+        $.ajax({
+            url: '/backup/upload/schedule',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                alert(response.message);
+                $('#bulkModal').modal('hide');
+                location.reload();
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    });
+
+    // 일괄 자산 연계 폼 제출
+    $('#bulkAssetLinkForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+
+        $.ajax({
+            url: '/backup/upload/schedule-asset-link',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                alert(response.message);
+                $('#bulkModal').modal('hide');
+                location.reload();
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    });
+});
+
+function openColumnSelectModal() {
+    $('#columnSelectModal').modal('show');
+}
+
+function applyColumnSelection() {
+    $('.column-check').each(function() {
+        const columnKey = $(this).val();
+        const isChecked = $(this).is(':checked');
+
+        if (isChecked) {
+            $(`.column-${columnKey}`).show();
+        } else {
+            $(`.column-${columnKey}`).hide();
+        }
+    });
+
+    $('#columnSelectModal').modal('hide');
+}
+
+function openBulkModal() {
+    $('#bulkModal').modal('show');
+}
+
+function openAddScheduleModal() {
+    $('#addScheduleModal').modal('show');
+}
+
+function bulkDelete() {
+    const selectedIds = [];
+    $('.schedule-checkbox:checked').each(function() {
+        selectedIds.push(parseInt($(this).val()));
+    });
+
+    if (selectedIds.length === 0) {
+        alert('삭제할 스케줄을 선택해주세요.');
+        return;
+    }
+
+    if (confirm(`선택한 ${selectedIds.length}개의 스케줄을 삭제하시겠습니까?`)) {
+        $.ajax({
+            url: '/backup/api/schedule/bulk-delete',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ schedule_ids: selectedIds }),
+            success: function(response) {
+                alert(response.message);
+                location.reload();
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    }
+}
+
+function exportSchedules() {
+    window.location.href = '/backup/download/schedule-export';
+}
+
+function showScheduleDetailById(scheduleId) {
+    $.ajax({
+        url: '/backup/api/schedule/' + scheduleId,
+        success: function(response) {
+            if (response.schedule) {
+                openEditScheduleModal(response.schedule);
+            } else {
+                alert('해당 스케줄을 찾을 수 없습니다.');
+            }
+        },
+        error: function() {
+            alert('스케줄 정보를 불러오는데 실패했습니다.');
+        }
+    });
+}
+
+function openEditScheduleModal(schedule) {
+    // Fill form fields
+    $('#editScheduleId').val(schedule.id);
+    $('#editUniqueId').val(schedule.unique_id || '');
+    $('#editCategory').val(schedule.category || '');
+    $('#editBusinessName').val(schedule.business_name || '');
+    $('#editHostname').val(schedule.hostname || '');
+    $('#editIpAddress').val(schedule.ip_address || '');
+    $('#editIntroductionYear').val(schedule.introduction_year || '');
+    $('#editVendor').val(schedule.vendor || '');
+    $('#editModelName').val(schedule.model_name || '');
+    $('#editOs').val(schedule.os || '');
+    $('#editOsVersion').val(schedule.os_version || '');
+    $('#editInstallationLocation').val(schedule.installation_location || '');
+    $('#editRedundancyConfig').val(schedule.redundancy_config || '');
+    $('#editBackupMethod').val(schedule.backup_method || '');
+    $('#editRetentionPeriod').val(schedule.retention_period || '');
+    $('#editOffsiteCycle').val(schedule.offsite_cycle || '');
+    $('#editOffsiteLocation').val(schedule.offsite_location || '');
+    $('#editOffsiteEquipment').val(schedule.offsite_equipment || '');
+    $('#editOffsiteRetention').val(schedule.offsite_retention || '');
+    $('#editBackupTarget').val(schedule.backup_target || '');
+    $('#editStorageMedia').val(schedule.storage_media || '');
+    $('#editBackupPolicy').val(schedule.backup_policy || '');
+    $('#editBackupSchedule').val(schedule.backup_schedule || '');
+    $('#editDbms').val(schedule.dbms || '');
+    $('#editTargetFilesystem').val(schedule.target_filesystem || '');
+    $('#editMemo').val(schedule.memo || '');
+
+    loadScheduleTimeSettings(schedule.schedule_times || [], 'edit');
+
+    // Load linked asset info
+    loadLinkedAsset(schedule.id, 'edit');
+
+    $('#editScheduleModal').modal('show');
+}
+
+function toggleAddTimeMode() {
+    const mode = $('#addTimeMode').val();
+    if (mode === 'specific') {
+        $('#addSpecificTimeSection').show();
+        $('#addRecurringTimeSection').hide();
+    } else {
+        $('#addSpecificTimeSection').hide();
+        $('#addRecurringTimeSection').show();
+    }
+}
+
+function toggleEditTimeMode() {
+    const mode = $('#editTimeMode').val();
+    if (mode === 'specific') {
+        $('#editSpecificTimeSection').show();
+        $('#editRecurringTimeSection').hide();
+    } else {
+        $('#editSpecificTimeSection').hide();
+        $('#editRecurringTimeSection').show();
+    }
+}
+
+function loadScheduleTimeSettings(scheduleTimes, mode) {
+    if (!scheduleTimes || scheduleTimes.length === 0) {
+        $(`#${mode}TimeMode`).val('specific');
+        if (mode === 'add') toggleAddTimeMode();
+        else toggleEditTimeMode();
+        return;
+    }
+
+    // Check if it's a specific time or recurring
+    const firstTime = scheduleTimes[0];
+
+    if (firstTime.day_of_week === 'SPECIFIC') {
+        // Specific time mode
+        $(`#${mode}TimeMode`).val('specific');
+        $(`#${mode}SpecificDateTime`).val(firstTime.backup_time);
+    } else {
+        // Recurring time mode
+        $(`#${mode}TimeMode`).val('recurring');
+
+        // Group by day
+        const dayTimes = {};
+        scheduleTimes.forEach(st => {
+            if (!dayTimes[st.day_of_week]) {
+                dayTimes[st.day_of_week] = [];
+            }
+            dayTimes[st.day_of_week].push(st.backup_time);
+        });
+
+        // Check days
+        $(`.${mode}-day-check`).prop('checked', false);
+        Object.keys(dayTimes).forEach(day => {
+            $(`#${mode}${day.charAt(0) + day.slice(1).toLowerCase()}`).prop('checked', true);
+        });
+
+        // Get unique times
+        const allTimes = new Set();
+        Object.values(dayTimes).forEach(times => {
+            times.forEach(t => allTimes.add(t));
+        });
+
+        $(`#${mode}RecurringTimes`).val(Array.from(allTimes).join(', '));
+    }
+
+    if (mode === 'add') toggleAddTimeMode();
+    else toggleEditTimeMode();
+}
+
+
+function loadLinkedAsset(scheduleId, mode) {
+    $.ajax({
+        url: '/backup/api/schedule/' + scheduleId + '/linked-asset',
+        success: function(response) {
+            if (response.asset) {
+                const asset = response.asset;
+                $(`#${mode}LinkedAssetPnum`).val(asset.pnum);
+                $(`#${mode}LinkedAssetDetails`).html(`
+                    <div><strong>서버명:</strong> <a href=/edit/${asset.pnum}>${asset.servername || '-'}</a></div>
+                    <div><strong>호스트명:</strong> ${asset.hostname || '-'}</div>
+                    <div><strong>IP:</strong> ${asset.ip || '-'}</div>
+                `);
+                $(`#${mode}LinkedAssetInfo`).show();
+            } else {
+                $(`#${mode}LinkedAssetPnum`).val('');
+                $(`#${mode}LinkedAssetInfo`).hide();
+            }
+        },
+        error: function() {
+            console.error('연계 자산 정보를 불러오는데 실패했습니다.');
+        }
+    });
+}
+
+let currentAssetMode = 'add'; // 'add' or 'edit'
+
+function openAssetSearchModal(mode) {
+    currentAssetMode = mode;
+    $('#assetSearchTerm').val('');
+    $('#assetSearchResultsBody').html('<tr><td colspan="5" class="text-center">검색어를 입력하고 검색 버튼을 클릭하세요.</td></tr>');
+    $('#assetSearchModal').modal('show');
+}
+
+function searchAssets() {
+    const searchTerm = $('#assetSearchTerm').val();
+
+    if (!searchTerm.trim()) {
+        alert('검색어를 입력하세요.');
+        return;
+    }
+
+    $('#assetSearchResultsBody').html('<tr><td colspan="5" class="text-center"><i class="fas fa-spinner fa-spin"></i> 검색 중...</td></tr>');
+
+    $.ajax({
+        url: '/backup/api/search-assets',
+        data: { term: searchTerm },
+        success: function(assets) {
+            const tbody = $('#assetSearchResultsBody');
+            tbody.empty();
+
+            if (assets.length === 0) {
+                tbody.html('<tr><td colspan="5" class="text-center">검색 결과가 없습니다.</td></tr>');
+            } else {
+                assets.forEach(function(asset) {
+                    tbody.append(`
+                        <tr class="asset-search-row" data-pnum="${asset.pnum}" data-servername="${asset.servername || ''}" data-hostname="${asset.hostname || ''}" data-ip="${asset.ip || ''}" style="cursor: pointer;">
+                            <td><input type="radio" name="selectedAsset" value="${asset.pnum}"></td>
+                            <td>${asset.servername || '-'}</td>
+                            <td>${asset.hostname || '-'}</td>
+                            <td>${asset.ip || '-'}</td>
+                            <td>${asset.os || '-'}</td>
+                        </tr>
+                    `);
+                });
+
+                // Row click to select radio
+                $('.asset-search-row').on('click', function() {
+                    $(this).find('input[type="radio"]').prop('checked', true);
+                });
+            }
+        },
+        error: function() {
+            $('#assetSearchResultsBody').html('<tr><td colspan="5" class="text-center text-danger">검색 중 오류가 발생했습니다.</td></tr>');
+        }
+    });
+}
+
+function selectAsset() {
+    const selectedRadio = $('input[name="selectedAsset"]:checked');
+
+    if (selectedRadio.length === 0) {
+        alert('자산을 선택해주세요.');
+        return;
+    }
+
+    const selectedRow = selectedRadio.closest('tr');
+    const pnum = selectedRadio.val();
+    const servername = selectedRow.data('servername');
+    const hostname = selectedRow.data('hostname');
+    const ip = selectedRow.data('ip');
+
+    $(`#${currentAssetMode}LinkedAssetPnum`).val(pnum);
+    $(`#${currentAssetMode}LinkedAssetDetails`).html(`
+        <div><strong>서버명:</strong> ${servername || '-'}</div>
+        <div><strong>호스트명:</strong> ${hostname || '-'}</div>
+        <div><strong>IP:</strong> ${ip || '-'}</div>
+    `);
+    $(`#${currentAssetMode}LinkedAssetInfo`).show();
+
+    $('#assetSearchModal').modal('hide');
+}
+
+function clearLinkedAsset(mode) {
+    $(`#${mode}LinkedAssetPnum`).val('');
+    $(`#${mode}LinkedAssetInfo`).hide();
+}
+
+$('#editScheduleForm').on('submit', function(e) {
+    e.preventDefault();
+
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData);
+    const scheduleId = data.schedule_id;
+
+    const timeMode = $('#editTimeMode').val();
+    let backupTimes = '';
+
+    if (timeMode === 'specific') {
+        const datetime = $('#editSpecificDateTime').val();
+        if (datetime) {
+            backupTimes = `지정 ${datetime}`;
+        }
+    } else {
+        const selectedDays = [];
+        $('.edit-day-check:checked').each(function() {
+            selectedDays.push($(this).val());
+        });
+
+        const times = $('#editRecurringTimes').val().split(',').map(t => t.trim()).filter(t => t);
+
+        if (selectedDays.length > 0 && times.length > 0) {
+            const dayNames = {
+                'MON': '월요일',
+                'TUE': '화요일',
+                'WED': '수요일',
+                'THU': '목요일',
+                'FRI': '금요일',
+                'SAT': '토요일',
+                'SUN': '일요일'
+            };
+
+            const timeEntries = [];
+            selectedDays.forEach(day => {
+                times.forEach(time => {
+                    timeEntries.push(`${dayNames[day]} ${time}`);
+                });
+            });
+            backupTimes = timeEntries.join(', ');
+        }
+    }
+
+    data.backup_times = backupTimes;
+
+    $.ajax({
+        url: '/backup/api/schedule/' + scheduleId,
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function(response) {
+            alert('스케줄이 수정되었습니다.');
+            $('#editScheduleModal').modal('hide');
+            location.reload();
+        },
+        error: function(xhr) {
+            const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+            alert('오류: ' + error);
+        }
+    });
+});
+</script>
+{% endblock %}

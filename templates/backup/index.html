@@ -1,0 +1,901 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3> 백업 관리</h3>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5><i class="fas fa-hdd"></i> 백업 스토리지 현황</h5>
+                    <button class="btn btn-primary btn-sm" onclick="openStorageModal()">
+                        <i class="fas fa-plus"></i> 스토리지 추가/수동등록
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="row" id="storageCards">
+                        {% for storage in backup_storages %}
+                        <div class="col-md-4 mb-3" data-storage-id="{{ storage.id }}">
+                            <div class="card border-left-primary">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h6 class="text-primary font-weight-bold">{{ storage.storage_name }}</h6>
+                                            <small class="text-muted">{{ storage.storage_type }} - {{ storage.location }}</small>
+                                        </div>
+                                        <div class="text-right">
+                                            <small class="text-muted">사용률</small>
+                                            <h6 class="text-{% if storage.usage_percentage > 80 %}danger{% elif storage.usage_percentage > 60 %}warning{% else %}success{% endif %}">
+                                                {{ "%.1f"|format(storage.usage_percentage) }}%
+                                            </h6>
+                                            <button class="btn btn-sm btn-outline-danger" onclick="deleteStorage({{ storage.id }})" title="삭제">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="progress mb-2" style="height: 10px;">
+                                        <div class="progress-bar bg-{% if storage.usage_percentage > 80 %}danger{% elif storage.usage_percentage > 60 %}warning{% else %}success{% endif %}"
+                                             style="width: {{ storage.usage_percentage }}%"></div>
+                                    </div>
+                                    <div class="row text-center">
+                                        <div class="col-4">
+                                            <small class="text-muted">총용량</small>
+                                            <div class="font-weight-bold">{{ "%.1f"|format(storage.total_capacity_tb) }} TB</div>
+                                        </div>
+                                        <div class="col-4">
+                                            <small class="text-muted">사용량</small>
+                                            <div class="font-weight-bold">{{ "%.1f"|format(storage.used_capacity_tb) }} TB</div>
+                                        </div>
+                                        <div class="col-4">
+                                            <small class="text-muted">가용량</small>
+                                            <div class="font-weight-bold">{{ "%.1f"|format(storage.available_capacity_tb) }} TB</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5><i class="fas fa-chart-line"></i> 스토리지 사용량 추이</h5>
+                    <div class="d-flex align-items-center">
+                        <div class="dropdown mr-2">
+                            <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" id="storageSelectDropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                스토리지 선택
+                            </button>
+                            <div class="dropdown-menu p-3" aria-labelledby="storageSelectDropdown" style="min-width: 250px;" onclick="event.stopPropagation();">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="selectAllStorages" checked>
+                                    <label class="form-check-label font-weight-bold" for="selectAllStorages">
+                                        전체 선택
+                                    </label>
+                                </div>
+                                <hr class="my-2">
+                                <div id="storageCheckboxList">
+                                    {% for storage in backup_storages %}
+                                    <div class="form-check">
+                                        <input class="form-check-input storage-checkbox" type="checkbox" value="{{ storage.id }}" id="storage{{ storage.id }}" checked>
+                                        <label class="form-check-label" for="storage{{ storage.id }}">
+                                            {{ storage.storage_name }}
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                        <input type="date" id="chartStartDate" class="form-control form-control-sm mr-2"
+                               value="{{ start_date }}" style="width: 150px;">
+                        <input type="date" id="chartEndDate" class="form-control form-control-sm mr-2"
+                               value="{{ end_date }}" style="width: 150px;">
+                        <button class="btn btn-primary btn-sm mr-2" onclick="updateChart()">조회</button>
+                        <button class="btn btn-success btn-sm" onclick="exportChartData()">
+                            <i class="fas fa-file-excel"></i> 내보내기
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="storageUsageChart" style="height: 400px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-history"></i> 지난 백업 (24시간)</h5>
+                </div>
+                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>시작시간</th>
+                                    <th>종료시간</th>
+                                    <th>정책명</th>
+                                    <th>스케줄명</th>
+                                    <th>상태</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for backup in past_backups %}
+                                <tr ondblclick="showBackupDetailByPolicy('{{ backup.policy_name }}', '{{ backup.schedule_name }}')" style="cursor: pointer;">
+                                    <td>{{ backup.job_start_time.strftime('%m-%d %H:%M') if backup.job_start_time else '-' }}</td>
+                                    <td>{{ backup.job_end_time.strftime('%m-%d %H:%M') if backup.job_end_time else '-' }}</td>
+                                    <td>{{ backup.policy_name }}</td>
+                                    <td>{{ backup.schedule_name }}</td>
+                                    <td>
+                                        <span class="badge badge-{{ get_status_class(backup.job_status) }}">
+                                            {{ get_status_display(backup.job_status) }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-clock"></i> 실행될 백업 (24시간)</h5>
+                </div>
+                <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>시작시간</th>
+                                    <th>종료시간</th>
+                                    <th>정책명</th>
+                                    <th>스케줄명</th>
+                                    <th>상태</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for backup in future_backups %}
+                                <tr ondblclick="showBackupDetailByPolicy('{{ backup.policy_name }}', '{{ backup.schedule_name }}')" style="cursor: pointer;">
+                                    <td>{{ backup.job_start_time.strftime('%m-%d %H:%M') if backup.job_start_time else '-' }}</td>
+                                    <td>{{ backup.job_end_time.strftime('%m-%d %H:%M') if backup.job_end_time else '-' }}</td>
+                                    <td>{{ backup.policy_name }}</td>
+                                    <td>{{ backup.schedule_name }}</td>
+                                    <td>
+                                        <span class="badge badge-info">Scheduled</span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5><i class="fas fa-list"></i> 백업 이력</h5>
+                    <div class="d-flex">
+                        <input type="date" id="historyStartDate" class="form-control form-control-sm mr-2"
+                               value="{{ start_date }}">
+                        <input type="date" id="historyEndDate" class="form-control form-control-sm mr-2"
+                               value="{{ end_date }}">
+                        <button class="btn btn-primary btn-sm mr-2" onclick="updateHistory()">조회</button>
+                        <button class="btn btn-success btn-sm" onclick="openHistoryUploadModal()">
+                            <i class="fas fa-upload"></i> 수동 등록
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table id="historyTable" class="table table-striped table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>시작시간</th>
+                                    <th>종료시간</th>
+                                    <th>정책명</th>
+                                    <th>스케줄명</th>
+                                    <th>상태</th>
+                                    <th>Type</th>
+                                    <th>용량(GB)</th>
+                                    <th>중복제거률(%)</th>
+                                    <th>실용량(GB)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for history in backup_history %}
+                                <tr ondblclick="showBackupDetailByPolicy('{{ history.policy_name }}', '{{ history.schedule_name }}')" style="cursor: pointer;">
+                                    <td>{{ history.job_start_time.strftime('%Y-%m-%d %H:%M') if history.job_start_time else '-' }}</td>
+                                    <td>{{ history.job_end_time.strftime('%Y-%m-%d %H:%M') if history.job_end_time else '-' }}</td>
+                                    <td>{{ history.policy_name }}</td>
+                                    <td>{{ history.schedule_name }}</td>
+                                    <td>
+                                        <span class="badge badge-{{ get_status_class(history.job_status) }}">
+                                            {{ get_status_display(history.job_status) }}
+                                        </span>
+                                    </td>
+                                    <td>{{ history.backup_type }}</td>
+                                    <td>{{ "%.1f"|format(history.data_size_gb) if history.data_size_gb else '0.0' }}</td>
+                                    <td>{{ "%.1f"|format(history.deduplication_rate) if history.deduplication_rate else '0.0' }}</td>
+                                    <td>{{ "%.1f"|format(history.actual_size_gb) if history.actual_size_gb else '0.0' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="storageModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">스토리지 추가/수동등록</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs" id="storageTab">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="storage-add-tab" data-toggle="tab" href="#storage-add">스토리지 신규 추가</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="storage-alloc-tab" data-toggle="tab" href="#storage-alloc">스토리지 할당 용량 수동 등록</a>
+                    </li>
+                </ul>
+                <div class="tab-content mt-3">
+                    <div class="tab-pane fade show active" id="storage-add">
+                        <form id="storageForm">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label>스토리지명 *</label>
+                                        <input type="text" class="form-control" name="storage_name" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>위치</label>
+                                        <input type="text" class="form-control" name="location" placeholder="예: IDC, 재해복구센터">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>총용량(TB) *</label>
+                                        <input type="number" class="form-control" name="total_capacity_tb" step="0.1" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label>스토리지 타입</label>
+                                        <select class="form-control" name="storage_type">
+                                            <option value="Disk">Disk</option>
+                                            <option value="SSD">SSD</option>
+                                            <option value="Tape">Tape</option>
+                                            <option value="클라우드">클라우드</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>스토리지 선택</label>
+                                        <select class="form-control" name="storage_source">
+                                            <option value="직접입력">직접입력</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">추가</button>
+                        </form>
+                    </div>
+
+                    <div class="tab-pane fade" id="storage-alloc">
+                        <form id="storageAllocForm">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>스토리지명 *</label>
+                                        <select class="form-control" name="storage_id" id="allocStorageSelect" required>
+                                            <option value="">선택하세요</option>
+                                            {% for storage in backup_storages %}
+                                            <option value="{{ storage.id }}" data-total-capacity="{{ storage.total_capacity_tb }}">{{ storage.storage_name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>총용량(TB)</label>
+                                        <input type="number" class="form-control" id="allocTotalCapacity" step="0.1" readonly>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>사용량(TB) *</label>
+                                        <input type="number" class="form-control" name="used_capacity_tb" id="allocUsedCapacity" step="0.1" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label>사용률(%)</label>
+                                        <input type="number" class="form-control" id="allocUsagePercentage" step="0.1" readonly>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>날짜 *</label>
+                                        <input type="date" class="form-control" name="record_date" required>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">등록</button>
+                        </form>
+
+                        <hr class="my-4">
+
+                        <h6>최근 등록 이력</h6>
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table id="storageHistoryTable" class="table table-sm table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>스토리지명</th>
+                                        <th>사용량(TB)</th>
+                                        <th>사용률(%)</th>
+                                        <th>날짜</th>
+                                        <th>작업</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="historyUploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">백업 이력 수동 등록</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <strong>입력 형식:</strong><br>
+                    • 시작시간/종료시간: YYYY-MM-DD HH:MM<br>
+                    • 상태: 0, 112 = 성공 | 1 = 부분성공 | 그 외 = 실패<br>
+                    • Type: Backup, Archive, Replication<br>
+                    • 중복제거률(%): 입력 없으면 0% (용량 = 실용량)
+                </div>
+                <div class="mb-3">
+                    <a href="{{ url_for('backup.download_backup_history_template') }}" class="btn btn-info">
+                        <i class="fas fa-download"></i> 템플릿 다운로드
+                    </a>
+                </div>
+                <form id="historyUploadForm" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label>Excel 파일 업로드</label>
+                        <input type="file" class="form-control-file" name="file" accept=".xlsx,.xls" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">업로드</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="scheduleDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">백업 스케줄 상세 정보</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="scheduleDetailContent">
+                </div>
+                <hr>
+                <h6>최근 백업 이력 (최대 100개)</h6>
+                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                    <table id="detailHistoryTable" class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>시작시간</th>
+                                <th>종료시간</th>
+                                <th>상태</th>
+                                <th>Type</th>
+                                <th>용량(GB)</th>
+                                <th>중복제거률(%)</th>
+                                <th>실용량(GB)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/plotly-latest.min.js') }}"></script>
+<script>
+$(document).ready(function() {
+    // DataTable 초기화
+    $('#historyTable').DataTable({
+        "order": [[ 0, "desc" ]],
+        "pageLength": 25,
+        "language": {
+            "url": "{{ url_for('static', filename='js/korean.json') }}"
+        }
+    });
+
+    // 초기 차트 로드
+    updateChart();
+    loadStorageHistory();
+
+    // 전체 선택 체크박스
+    $('#selectAllStorages').on('change', function() {
+        $('.storage-checkbox').prop('checked', this.checked);
+    });
+
+    // 개별 체크박스
+    $('.storage-checkbox').on('change', function() {
+        const allChecked = $('.storage-checkbox:checked').length === $('.storage-checkbox').length;
+        $('#selectAllStorages').prop('checked', allChecked);
+    });
+
+    // 스토리지 선택 변경시 총용량 자동 입력
+    $('#allocStorageSelect').on('change', function() {
+        const selectedOption = $(this).find('option:selected');
+        const totalCapacity = selectedOption.data('total-capacity');
+        $('#allocTotalCapacity').val(totalCapacity || '');
+        $('#allocUsedCapacity').val('');
+        $('#allocUsagePercentage').val('');
+    });
+
+    // 사용량 입력시 사용률 자동 계산
+    $('#allocUsedCapacity').on('input', function() {
+        const totalCapacity = parseFloat($('#allocTotalCapacity').val()) || 0;
+        const usedCapacity = parseFloat($(this).val()) || 0;
+
+        if (totalCapacity > 0) {
+            const usagePercentage = (usedCapacity / totalCapacity * 100).toFixed(1);
+            $('#allocUsagePercentage').val(usagePercentage);
+        } else {
+            $('#allocUsagePercentage').val('0.0');
+        }
+    });
+
+    // 스토리지 추가 폼 제출
+    $('#storageForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+        const data = Object.fromEntries(formData);
+
+        $.ajax({
+            url: '/backup/api/storage',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                alert('스토리지가 추가되었습니다.');
+                location.reload();
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    });
+
+    // 스토리지 할당 용량 등록 폼 제출
+    $('#storageAllocForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+        const data = Object.fromEntries(formData);
+
+        $.ajax({
+            url: '/backup/api/storage-history',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                alert('스토리지 이력이 등록되었습니다.');
+                loadStorageHistory();
+                $('#storageAllocForm')[0].reset();
+                $('#allocTotalCapacity').val('');
+                $('#allocUsagePercentage').val('');
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    });
+
+    // 백업 이력 업로드 폼 제출
+    $('#historyUploadForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+
+        $.ajax({
+            url: '/backup/upload/backup-history',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                alert(response.message);
+                $('#historyUploadModal').modal('hide');
+                location.reload();
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    });
+});
+
+function openStorageModal() {
+    $('#storageModal').modal('show');
+}
+
+function openHistoryUploadModal() {
+    $('#historyUploadModal').modal('show');
+}
+
+function deleteStorage(storageId) {
+    if (confirm('이 스토리지를 삭제하시겠습니까?')) {
+        $.ajax({
+            url: '/backup/api/storage/' + storageId,
+            method: 'DELETE',
+            success: function(response) {
+                alert('스토리지가 삭제되었습니다.');
+                location.reload();
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    }
+}
+
+function deleteStorageHistory(historyId) {
+    if (confirm('이 이력을 삭제하시겠습니까?')) {
+        $.ajax({
+            url: '/backup/api/storage-history/' + historyId,
+            method: 'DELETE',
+            success: function(response) {
+                alert('스토리지 이력이 삭제되었습니다.');
+                loadStorageHistory();
+            },
+            error: function(xhr) {
+                const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+                alert('오류: ' + error);
+            }
+        });
+    }
+}
+
+function loadStorageHistory() {
+    $.ajax({
+        url: '/backup/api/storage-history-list',
+        success: function(data) {
+            const tbody = $('#storageHistoryTable tbody');
+            tbody.empty();
+
+            data.forEach(item => {
+                tbody.append(`
+                    <tr>
+                        <td>${item.storage_name}</td>
+                        <td>${item.used_capacity_tb.toFixed(1)}</td>
+                        <td>${item.usage_percentage.toFixed(1)}</td>
+                        <td>${item.record_date}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteStorageHistory(${item.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `);
+            });
+        },
+        error: function() {
+            console.error('스토리지 이력을 불러오는데 실패했습니다.');
+        }
+    });
+}
+
+function getSelectedStorageIds() {
+    const selectedIds = [];
+    $('.storage-checkbox:checked').each(function() {
+        selectedIds.push($(this).val());
+    });
+    return selectedIds.join(',');
+}
+
+function updateChart() {
+    const startDate = $('#chartStartDate').val();
+    const endDate = $('#chartEndDate').val();
+    const storageIds = getSelectedStorageIds();
+
+    $.ajax({
+        url: '/backup/api/storage-usage-history',
+        data: {
+            start_date: startDate,
+            end_date: endDate,
+            storage_ids: storageIds
+        },
+        success: function(data) {
+            drawStorageChart(data);
+        },
+        error: function() {
+            alert('차트 데이터를 불러오는데 실패했습니다.');
+        }
+    });
+}
+
+function updateHistory() {
+    const startDate = $('#historyStartDate').val();
+    const endDate = $('#historyEndDate').val();
+
+    $.ajax({
+        url: '/backup/api/backup-history',
+        data: { start_date: startDate, end_date: endDate },
+        success: function(data) {
+            updateHistoryTable(data);
+        },
+        error: function() {
+            alert('이력 데이터를 불러오는데 실패했습니다.');
+        }
+    });
+}
+
+function drawStorageChart(data) {
+    // 스토리지별로 데이터 그룹화
+    const storageGroupsUsage = {};
+    const storageGroupsPercentage = {};
+    const dates = new Set();
+
+    data.forEach(item => {
+        const storageName = item.storage_name;
+        const recordDate = item.record_date;
+        dates.add(recordDate);
+
+        // 사용량 데이터
+        if (!storageGroupsUsage[storageName]) {
+            storageGroupsUsage[storageName] = {
+                x: [],
+                y: [],
+                name: storageName + ' (사용량)',
+                type: 'scatter',
+                mode: 'lines+markers',
+                yaxis: 'y'
+            };
+        }
+        storageGroupsUsage[storageName].x.push(recordDate);
+        storageGroupsUsage[storageName].y.push(item.used_capacity_tb);
+
+        // 사용률 데이터
+        if (!storageGroupsPercentage[storageName]) {
+            storageGroupsPercentage[storageName] = {
+                x: [],
+                y: [],
+                name: storageName + ' (사용률)',
+                type: 'scatter',
+                mode: 'lines+markers',
+                yaxis: 'y2',
+                line: { dash: 'dot' }
+            };
+        }
+        storageGroupsPercentage[storageName].x.push(recordDate);
+        storageGroupsPercentage[storageName].y.push(item.usage_percentage);
+    });
+
+    const traces = [...Object.values(storageGroupsUsage), ...Object.values(storageGroupsPercentage)];
+
+    const layout = {
+        title: '스토리지 사용량 및 사용률 추이',
+        xaxis: { title: '날짜' },
+        yaxis: {
+            title: '사용량 (TB)',
+            side: 'left'
+        },
+        yaxis2: {
+            title: '사용률 (%)',
+            overlaying: 'y',
+            side: 'right'
+        },
+        hovermode: 'closest',
+        showlegend: true,
+        legend: {
+            orientation: 'h',
+            y: -0.2
+        }
+    };
+
+    Plotly.newPlot('storageUsageChart', traces, layout);
+}
+
+function exportChartData() {
+    const startDate = $('#chartStartDate').val();
+    const endDate = $('#chartEndDate').val();
+    const storageIds = getSelectedStorageIds();
+
+    if (!storageIds) {
+        alert('내보낼 스토리지를 선택해주세요.');
+        return;
+    }
+
+    window.location.href = `/backup/api/storage-usage-export?start_date=${startDate}&end_date=${endDate}&storage_ids=${storageIds}`;
+}
+
+function updateHistoryTable(data) {
+    const table = $('#historyTable').DataTable();
+    table.clear();
+
+    data.forEach(item => {
+        table.row.add([
+            item.job_start_time || '-',
+            item.job_end_time || '-',
+            item.policy_name || '-',
+            item.schedule_name || '-',
+            `<span class="badge badge-${item.status_class}">${item.status_display}</span>`,
+            item.backup_type || 'Backup',
+            (item.data_size_gb || 0).toFixed(1),
+            (item.deduplication_rate || 0).toFixed(1),
+            (item.actual_size_gb || 0).toFixed(1)
+        ]);
+    });
+
+    table.draw();
+}
+function showBackupDetailByPolicy(policyName, scheduleName) {
+    if (!policyName || !scheduleName) return;
+
+    $.ajax({
+        url: '/backup/api/schedule-by-policy',
+        data: { policy_name: policyName, schedule_name: scheduleName },
+        success: function(response) {
+            if (response.schedule) {
+                loadLinkedAsset(response.schedule, response.history, response.expected_capacity);
+            } else {
+                alert('해당 스케줄을 찾을 수 없습니다.');
+            }
+        },
+        error: function() {
+            alert('스케줄 정보를 불러오는데 실패했습니다.');
+        }
+    });
+}
+function loadLinkedAsset(schedule, history, expectedCapacity) {
+    $.ajax({
+        url: '/backup/api/schedule/' + schedule.id + '/linked-asset',
+        success: function(response) {
+            if (response.asset) {
+                const asset = response.asset;
+                showScheduleDetail(schedule, history, expectedCapacity, asset.pnum);
+            }
+            console.error('연계 자산 정보를 불러오는데 실패했습니다.');
+        },
+        error: function() {
+            console.error('연계 자산 정보를 불러오는데 실패했습니다.');
+        }
+    });
+}
+function showScheduleDetail(schedule, history, expectedCapacity, pnum) {
+    let detailHtml = `
+        <div class="row">
+            <div class="col-md-6">
+                <h6>기본 정보</h6>
+                <table class="table table-sm">
+                    <tr><th>고유번호</th><td>${schedule.unique_id || '-'}</td></tr>
+                    <tr><th>구분</th><td>${schedule.category || '-'}</td></tr>
+                    <tr><th>업무명</th><td><a href=/edit/${pnum}>${schedule.business_name || '-'}</a></td></tr>
+                    <tr><th>호스트명</th><td>${schedule.hostname || '-'}</td></tr>
+                    <tr><th>IP주소</th><td>${schedule.ip_address || '-'}</td></tr>
+                    <tr><th>도입년도</th><td>${schedule.introduction_year || '-'}</td></tr>
+                    <tr><th>벤더</th><td>${schedule.vendor || '-'}</td></tr>
+                    <tr><th>모델명</th><td>${schedule.model_name || '-'}</td></tr>
+                    <tr><th>OS</th><td>${schedule.os || '-'}</td></tr>
+                    <tr><th>OS version</th><td>${schedule.os_version || '-'}</td></tr>
+                    <tr><th>설치 장소</th><td>${schedule.installation_location || '-'}</td></tr>
+                    <tr><th>이중화 구성</th><td>${schedule.redundancy_config || '-'}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h6>백업 정보</h6>
+                <table class="table table-sm">
+                    <tr><th>백업 방식</th><td>${schedule.backup_method || '-'}</td></tr>
+                    <tr><th>보관 주기</th><td>${schedule.retention_period || '-'}</td></tr>
+                    <tr><th>백업 시간</th><td>${schedule.schedule_times_display || '-'}</td></tr>
+                    <tr><th>소산 주기</th><td>${schedule.offsite_cycle || '-'}</td></tr>
+                    <tr><th>소산 장소</th><td>${schedule.offsite_location || '-'}</td></tr>
+                    <tr><th>소산 장비</th><td>${schedule.offsite_equipment || '-'}</td></tr>
+                    <tr><th>소산 보관주기</th><td>${schedule.offsite_retention || '-'}</td></tr>
+                    <tr><th>저장 매체</th><td>${schedule.storage_media || '-'}</td></tr>
+                    <tr><th>백업 정책명</th><td>${schedule.backup_policy || '-'}</td></tr>
+                    <tr><th>백업 스케줄명</th><td>${schedule.backup_schedule || '-'}</td></tr>
+                    <tr><th>DBMS</th><td>${schedule.dbms || '-'}</td></tr>
+                    <tr><th>예상 용량</th><td>${(expectedCapacity || 0).toFixed(1)} GB</td></tr>
+                </table>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-12">
+                <h6>백업 대상</h6>
+                <pre class="bg-light p-2">${schedule.backup_target || '-'}</pre>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-12">
+                <h6>타겟 파일시스템</h6>
+                <pre class="bg-light p-2">${schedule.target_filesystem || '-'}</pre>
+            </div>
+        </div>
+        ${schedule.memo ? `
+        <div class="row">
+            <div class="col-12">
+                <h6>메모</h6>
+                <pre class="bg-light p-2">${schedule.memo}</pre>
+            </div>
+        </div>
+        ` : ''}
+    `;
+
+    $('#scheduleDetailContent').html(detailHtml);
+
+    const tbody = $('#detailHistoryTable tbody');
+    tbody.empty();
+
+    history.forEach(item => {
+        tbody.append(`
+            <tr>
+                <td>${item.job_start_time || '-'}</td>
+                <td>${item.job_end_time || '-'}</td>
+                <td><span class="badge badge-${item.status_class}">${item.status_display}</span></td>
+                <td>${item.backup_type || 'Backup'}</td>
+                <td>${(item.data_size_gb || 0).toFixed(1)}</td>
+                <td>${(item.deduplication_rate || 0).toFixed(1)}</td>
+                <td>${(item.actual_size_gb || 0).toFixed(1)}</td>
+            </tr>
+        `);
+    });
+
+    $('#scheduleDetailModal').modal('show');
+}
+</script>
+{% endblock %}

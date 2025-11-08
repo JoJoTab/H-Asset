@@ -1,0 +1,964 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2>스토리지 관리</h2>
+    <!-- 탭 네비게이션 -->
+    <ul class="nav nav-tabs" id="storageTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="capacity-tab" data-toggle="tab" data-target="#capacity" type="button" role="tab">용량 관리</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="history-tab" data-toggle="tab" data-target="#history" type="button" role="tab">이력 관리</button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="storageTabContent">
+        <!-- 용량 관리 탭 -->
+        <div class="tab-pane fade show active" id="capacity" role="tabpanel">
+            <!-- 스토리지 현황 대시보드 -->
+            <div class="dashboard-section mt-4">
+                <h4 class="mb-4">스토리지 현황 대시보드</h4>
+                <div class="row" id="storageOverview">
+                    {% for storage in storage_overview %}
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card storage-card">
+                            <div class="storage-header">
+                                <h5 class="mb-1">
+                                    {{ storage.display_name }}
+                                    <span class="badge badge-{{ 'success' if storage.status == '사용' else 'warning' if storage.status == '유휴' else 'danger' }}">
+                                        {{ storage.status }}
+                                    </span>
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <small class="text-muted">총 용량</small>
+                                        <h6>{{ "%.1f"|format(storage.total_capacity) }} TB</h6>
+                                    </div>
+                                    <div class="col-6">
+                                        <small class="text-muted">할당량</small>
+                                        <h6>{{ "%.1f"|format(storage.allocated_capacity) }} TB</h6>
+                                    </div>
+                                </div>
+                                <div class="capacity-bar">
+                                    <div class="capacity-fill {{ storage.capacity_level }}"
+                                         style="width: {{ storage.allocation_rate }}%"></div>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <small>할당률: {{ "%.1f"|format(storage.allocation_rate) }}%</small>
+                                    <small>사용률: {{ "%.1f"|format(storage.usage_rate) }}%</small>
+                                </div>
+                                <button class="btn btn-sm btn-edit-storage mt-2"
+                                        onclick="editStorage({{ storage.id }}, '{{ storage.storage_code }}', '{{ storage.storage_name }}', '{{ storage.status }}', '{{ storage.location or '' }}', '{{ storage.memo or '' }}')">
+                                    편집
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- 기존 용량 관리 기능 -->
+            <!-- 날짜 선택 폼 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>기간 선택</h5>
+                </div>
+                <div class="card-body">
+                    <form id="dateForm" class="date-form">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label for="start_date">시작 날짜:</label>
+                                    <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label for="end_date">종료 날짜:</label>
+                                    <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary">조회</button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- 엑셀 내보내기 폼 -->
+                    <div class="export-form">
+                        <button type="button" class="btn btn-success" onclick="exportStorageData()">
+                            <i class="bi bi-file-excel"></i> 엑셀로 내보내기
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="errorMessage" class="alert alert-danger" style="display: none;"></div>
+
+            <!-- 그래프 표시 -->
+            <div class="card mb-4" id="graphCard" style="display: none;">
+                <div class="card-header">
+                    <h5>스토리지 사용 추이</h5>
+                </div>
+                <div class="card-body">
+                    <div class="graph-container">
+                        <h6>할당률 추이</h6>
+                        <div id="graphTl"></div>
+                    </div>
+                    <div class="graph-container">
+                        <h6>사용률 추이</h6>
+                        <div id="graphUse"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 스토리지 데이터 표시 -->
+            <div class="card mb-4" id="currentDataCard">
+                <div class="card-header">
+                    <h5>스토리지 현황 (<span id="latestDate">{{ latest_date }}</span>)</h5>
+                </div>
+                <div class="card-body" id="currentDataBody">
+                    {% for storage, pids in data1.items() %}
+                    <h5>{{ storage }}</h5>
+                    <div class="table-container">
+                        <table class="table table-striped table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>PID</th>
+                                    <th>가용량(TB)</th>
+                                    <th>총용량(TB)</th>
+                                    <th>할당량(TB)</th>
+                                    <th>할당률(%)</th>
+                                    <th>사용률(%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for pid, data in pids.items() %}
+                                <tr>
+                                    <td>{{ pid }}</td>
+                                    <td>{{ data.AV_CAP|round(2) }} {% if data.AV_CAP_diff %}<span class="text-muted">{{ data.AV_CAP_diff }}</span>{% endif %}</td>
+                                    <td>{{ data.TP_CAP|round(2) }} {% if data.TP_CAP_diff %}<span class="text-muted">{{ data.TP_CAP_diff }}</span>{% endif %}</td>
+                                    <td>{{ data.TL_CAP|round(2) }} {% if data.TL_CAP_diff %}<span class="text-muted">{{ data.TL_CAP_diff }}</span>{% endif %}</td>
+                                    <td>{{ data.TL_RATE|round(2) }}%</td>
+                                    <td>{{ data.USE_RATE|round(2) }}%</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- 전체 데이터 표시 -->
+            <div class="card">
+                <div class="card-header">
+                    <h5>전체 스토리지 데이터</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-container">
+                        <table id="storageTable" class="table table-striped table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>날짜</th>
+                                    <th>스토리지</th>
+                                    <th>PID</th>
+                                    <th>가용량(TB)</th>
+                                    <th>총용량(TB)</th>
+                                    <th>할당량(TB)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in data2 %}
+                                <tr>
+                                    <td>{{ row.DATEIN }}</td>
+                                    <td>{{ row.STORAGE }}</td>
+                                    <td>{{ row.PID }}</td>
+                                    <td>{{ row.AV_CAP|round(2) }}</td>
+                                    <td>{{ row.TP_CAP|round(2) }}</td>
+                                    <td>{{ row.TL_CAP|round(2) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 이력 관리 탭 -->
+        <div class="tab-pane fade" id="history" role="tabpanel">
+            <div class="mt-4">
+                <!-- 이력 관리 서브 탭 -->
+                <ul class="nav nav-pills mb-3" id="historySubTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="incident-tab" data-toggle="pill" data-target="#incident" type="button" role="tab">인시던트 관리</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="allocation-tab" data-toggle="pill" data-target="#allocation" type="button" role="tab">할당/회수 관리</button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="historySubTabContent">
+                    <!-- 인시던트 관리 -->
+                    <div class="tab-pane fade show active" id="incident" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5>인시던트 관리</h5>
+                                <button class="btn btn-primary" onclick="addIncident()">인시던트 추가</button>
+                            </div>
+                            <div class="card-body">
+                                <!-- 날짜 필터 -->
+                                <div class="row mb-3">
+                                    <div class="col-md-3">
+                                        <input type="date" class="form-control" id="incident_start_date" placeholder="시작일">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <input type="date" class="form-control" id="incident_end_date" placeholder="종료일">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <button class="btn btn-info" onclick="filterIncidents()">조회</button>
+                                        <button class="btn btn-success" onclick="exportIncidents()">엑셀 내보내기</button>
+                                    </div>
+                                </div>
+                                <table id="incidentTable" class="table table-striped table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>스토리지</th>
+                                            <th>발생일자</th>
+                                            <th>완료일자</th>
+                                            <th>이슈사항</th>
+                                            <th>처리내역</th>
+                                            <th>상태</th>
+                                            <th>작업</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 할당/회수 관리 -->
+                    <div class="tab-pane fade" id="allocation" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5>할당/회수 관리</h5>
+                                <button class="btn btn-primary" onclick="addAllocation()">할당/회수 추가</button>
+                            </div>
+                            <div class="card-body">
+                                <!-- 날짜 필터 -->
+                                <div class="row mb-3">
+                                    <div class="col-md-3">
+                                        <input type="date" class="form-control" id="allocation_start_date" placeholder="시작일">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <input type="date" class="form-control" id="allocation_end_date" placeholder="종료일">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <button class="btn btn-info" onclick="filterAllocations()">조회</button>
+                                        <button class="btn btn-success" onclick="exportAllocations()">엑셀 내보내기</button>
+                                    </div>
+                                </div>
+                                <table id="allocationTable" class="table table-striped table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>구분</th>
+                                            <th>수행일자</th>
+                                            <th>대상스토리지</th>
+                                            <th>대상시스템</th>
+                                            <th>용량변화</th>
+                                            <th>수행자</th>
+                                            <th>작업</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 스토리지 편집 모달 -->
+<div class="modal fade" id="storageEditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">스토리지 정보 편집</h5>
+            </div>
+            <form id="storageEditForm">
+                <div class="modal-body">
+                    <input type="hidden" id="edit_storage_id">
+                    <div class="mb-3">
+                        <label class="form-label">스토리지 코드</label>
+                        <input type="text" class="form-control" id="edit_storage_code" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">스토리지 명칭</label>
+                        <input type="text" class="form-control" id="edit_storage_name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">사용 상태</label>
+                        <select class="form-control" id="edit_storage_status" required>
+                            <option value="사용">사용</option>
+                            <option value="유휴">유휴</option>
+                            <option value="폐기">폐기</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">설치 위치</label>
+                        <input type="text" class="form-control" id="edit_storage_location">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">메모</label>
+                        <textarea class="form-control" id="edit_storage_memo" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 인시던트 모달 -->
+<div class="modal fade" id="incidentModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="incidentModalTitle">인시던트 추가</h5>
+            </div>
+            <form id="incidentForm">
+                <div class="modal-body">
+                    <input type="hidden" id="incident_id">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">스토리지</label>
+                                <select class="form-control" id="incident_storage_id" required>
+                                    {% for storage in storage_list %}
+                                    <option value="{{ storage.id }}">{{ storage.display_name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">상태</label>
+                                <select class="form-control" id="incident_status">
+                                    <option value="진행중">진행중</option>
+                                    <option value="완료">완료</option>
+                                    <option value="보류">보류</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">발생일자</label>
+                                <input type="date" class="form-control" id="incident_date" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">완료일자</label>
+                                <input type="date" class="form-control" id="completion_date">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">이슈사항</label>
+                        <textarea class="form-control" id="issue_description" rows="3" required></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">처리내역</label>
+                        <textarea class="form-control" id="resolution_details" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 할당/회수 모달 -->
+<div class="modal fade" id="allocationModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="allocationModalTitle">할당/회수 추가</h5>
+            </div>
+            <form id="allocationForm">
+                <div class="modal-body">
+                    <input type="hidden" id="allocation_id">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">구분</label>
+                                <select class="form-control" id="action_type" required>
+                                    <option value="할당">할당</option>
+                                    <option value="회수">회수</option>
+                                    <option value="증설">증설</option>
+                                    <option value="축소">축소</option>
+                                    <option value="기타">기타</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">수행일자</label>
+                                <input type="date" class="form-control" id="action_date" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">대상스토리지</label>
+                                <input type="text" class="form-control" id="target_storage" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">대상시스템</label>
+                                <input type="text" class="form-control" id="target_system" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">용량 변화량 (TB)</label>
+                                <input type="number" step="0.01" class="form-control" id="capacity_change">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">수행자</label>
+                                <input type="text" class="form-control" id="performed_by">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">상세 설명</label>
+                        <textarea class="form-control" id="allocation_description" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/jquery-3.5.1.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/popper.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bootstrap.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/jquery.dataTables.min.js') }}"></script>
+<script>
+    let storageTable, incidentTable, allocationTable;
+    let currentIncidentId = null;
+    let currentAllocationId = null;
+
+    $(document).ready(function() {
+        // DataTables 초기화
+        storageTable = $('#storageTable').DataTable({
+            "order": [[ 0, "desc" ]],
+            "pageLength": 25,
+            "language": {
+                "url": "{{ url_for('static', filename='js/korean.json') }}"
+            }
+        });
+
+        incidentTable = $('#incidentTable').DataTable({
+            "order": [[ 1, "desc" ]],
+            "pageLength": 25,
+            "language": {
+                "url": "{{ url_for('static', filename='js/korean.json') }}"
+            }
+        });
+
+        allocationTable = $('#allocationTable').DataTable({
+            "order": [[ 1, "desc" ]],
+            "pageLength": 25,
+            "language": {
+                "url": "{{ url_for('static', filename='js/korean.json') }}"
+            }
+        });
+
+        // 초기 데이터 로드
+        loadIncidents();
+        loadAllocations();
+
+        // 이력 관리 탭 클릭 시 데이터 로드
+        $('#history-tab').on('shown.bs.tab', function() {
+            loadIncidents();
+            loadAllocations();
+        });
+
+        // 날짜 폼 제출 이벤트
+        $('#dateForm').submit(function(e) {
+            e.preventDefault();
+            loadStorageData();
+        });
+    });
+
+    // 스토리지 데이터 로드
+    function loadStorageData() {
+        const startDate = $('#start_date').val();
+        const endDate = $('#end_date').val();
+
+        $.post('/storage/load_data', {
+            start_date: startDate,
+            end_date: endDate
+        })
+        .done(function(response) {
+            if (response.success) {
+                // 그래프 업데이트
+                if (response.graph_html_tl && response.graph_html_use) {
+                    $('#graphTl').html(response.graph_html_tl);
+                    $('#graphUse').html(response.graph_html_use);
+                    $('#graphCard').show();
+                } else {
+                    $('#graphCard').hide();
+                }
+
+                // 현재 데이터 업데이트
+                if (response.current_data_html) {
+                    $('#currentDataBody').html(response.current_data_html);
+                    $('#latestDate').text(response.latest_date);
+                }
+
+                // 전체 데이터 테이블 업데이트
+                if (response.table_data) {
+                    storageTable.clear();
+                    response.table_data.forEach(function(row) {
+                        storageTable.row.add([
+                            row.DATEIN,
+                            row.STORAGE,
+                            row.PID,
+                            row.AV_CAP,
+                            row.TP_CAP,
+                            row.TL_CAP
+                        ]);
+                    });
+                    storageTable.draw();
+                }
+
+                // 에러 메시지 숨기기
+                $('#errorMessage').hide();
+            } else {
+                $('#errorMessage').text(response.message).show();
+            }
+        })
+        .fail(function() {
+            $('#errorMessage').text('데이터를 불러오는데 실패했습니다.').show();
+        });
+    }
+
+    // 인시던트 데이터 로드
+    function loadIncidents() {
+        const startDate = $('#incident_start_date').val();
+        const endDate = $('#incident_end_date').val();
+
+        $.get('/storage/incidents', {
+            start_date: startDate,
+            end_date: endDate
+        })
+        .done(function(data) {
+            incidentTable.clear();
+            data.forEach(function(incident) {
+                const statusBadge = getStatusBadge(incident.status);
+                incidentTable.row.add([
+                    incident.display_name,
+                    incident.incident_date,
+                    incident.completion_date || '-',
+                    incident.issue_description,
+                    incident.resolution_details || '-',
+                    statusBadge,
+                    `<button class="btn btn-sm btn-warning" onclick="editIncident(${incident.id})">수정</button>
+                     <button class="btn btn-sm btn-danger" onclick="deleteIncident(${incident.id})">삭제</button>`
+                ]);
+            });
+            incidentTable.draw();
+        })
+        .fail(function() {
+            alert('인시던트 데이터를 불러오는데 실패했습니다.');
+        });
+    }
+
+    // 할당/회수 데이터 로드
+    function loadAllocations() {
+        const startDate = $('#allocation_start_date').val();
+        const endDate = $('#allocation_end_date').val();
+
+        $.get('/storage/allocations', {
+            start_date: startDate,
+            end_date: endDate
+        })
+        .done(function(data) {
+            allocationTable.clear();
+            data.forEach(function(allocation) {
+                const typeBadge = getTypeBadge(allocation.action_type);
+                allocationTable.row.add([
+                    typeBadge,
+                    allocation.action_date,
+                    allocation.target_storage,
+                    allocation.target_system,
+                    (allocation.capacity_change || '-') + ' TB',
+                    allocation.performed_by || '-',
+                    `<button class="btn btn-sm btn-warning" onclick="editAllocation(${allocation.id})">수정</button>
+                     <button class="btn btn-sm btn-danger" onclick="deleteAllocation(${allocation.id})">삭제</button>`
+                ]);
+            });
+            allocationTable.draw();
+        })
+        .fail(function() {
+            alert('할당/회수 데이터를 불러오는데 실패했습니다.');
+        });
+    }
+
+    // 상태 배지 생성
+    function getStatusBadge(status) {
+        let badgeClass = 'secondary';
+        if (status === '완료') badgeClass = 'success';
+        else if (status === '진행중') badgeClass = 'warning';
+        return `<span class="badge badge-${badgeClass}">${status}</span>`;
+    }
+
+    // 타입 배지 생성
+    function getTypeBadge(type) {
+        let badgeClass = 'secondary';
+        if (type === '할당') badgeClass = 'primary';
+        else if (type === '회수') badgeClass = 'info';
+        else if (type === '증설') badgeClass = 'success';
+        else if (type === '축소') badgeClass = 'warning';
+        return `<span class="badge badge-${badgeClass}">${type}</span>`;
+    }
+
+    // 스토리지 편집
+    function editStorage(id, code, name, status, location, memo) {
+        $('#edit_storage_id').val(id);
+        $('#edit_storage_code').val(code);
+        $('#edit_storage_name').val(name);
+        $('#edit_storage_status').val(status);
+        $('#edit_storage_location').val(location);
+        $('#edit_storage_memo').val(memo);
+        $('#storageEditModal').modal('show');
+    }
+
+    $('#storageEditForm').submit(function(e) {
+        e.preventDefault();
+        const formData = {
+            id: $('#edit_storage_id').val(),
+            storage_name: $('#edit_storage_name').val(),
+            status: $('#edit_storage_status').val(),
+            location: $('#edit_storage_location').val(),
+            memo: $('#edit_storage_memo').val()
+        };
+
+        $.post('/storage/update_storage_info', formData)
+            .done(function(response) {
+                if (response.success) {
+                    alert('스토리지 정보가 업데이트되었습니다.');
+                    $('#storageEditModal').modal('hide');
+                    // 대시보드 새로고침
+                    loadStorageOverview();
+                } else {
+                    alert('오류: ' + response.message);
+                }
+            })
+            .fail(function() {
+                alert('서버 오류가 발생했습니다.');
+            });
+    });
+
+    // 스토리지 개요 새로고침
+    function loadStorageOverview() {
+        $.get('/storage/overview')
+            .done(function(data) {
+                let html = '';
+                data.forEach(function(storage) {
+                    const badgeClass = storage.status === '사용' ? 'success' :
+                                     storage.status === '유휴' ? 'warning' : 'danger';
+                    html += `
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card storage-card">
+                                <div class="storage-header">
+                                    <h5 class="mb-1">${storage.display_name}</h5>
+                                    <small>
+                                        <span class="badge badge-${badgeClass}">${storage.status}</span>
+                                    </small>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-6">
+                                            <small class="text-muted">총 용량</small>
+                                            <h6>${storage.total_capacity.toFixed(1)} TB</h6>
+                                        </div>
+                                        <div class="col-6">
+                                            <small class="text-muted">할당량</small>
+                                            <h6>${storage.allocated_capacity.toFixed(1)} TB</h6>
+                                        </div>
+                                    </div>
+                                    <div class="capacity-bar">
+                                        <div class="capacity-fill ${storage.capacity_level}"
+                                             style="width: ${storage.allocation_rate}%"></div>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <small>할당률: ${storage.allocation_rate.toFixed(1)}%</small>
+                                        <small>사용률: ${storage.usage_rate.toFixed(1)}%</small>
+                                    </div>
+                                    <button class="btn btn-sm btn-edit-storage mt-2"
+                                            onclick="editStorage(${storage.id}, '${storage.storage_code}', '${storage.storage_name}', '${storage.status}', '${storage.location || ''}', '${storage.memo || ''}')">
+                                        편집
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                $('#storageOverview').html(html);
+            });
+    }
+
+    // 인시던트 관리
+    function addIncident() {
+        $('#incidentModalTitle').text('인시던트 추가');
+        $('#incidentForm')[0].reset();
+        $('#incident_id').val('');
+        currentIncidentId = null;
+        $('#incidentModal').modal('show');
+    }
+
+    function editIncident(id) {
+        $('#incidentModalTitle').text('인시던트 수정');
+        currentIncidentId = id;
+
+        $.get('/storage/incident/' + id)
+            .done(function(data) {
+                $('#incident_id').val(data.id);
+                $('#incident_storage_id').val(data.storage_id);
+                $('#incident_date').val(data.incident_date);
+                $('#completion_date').val(data.completion_date);
+                $('#issue_description').val(data.issue_description);
+                $('#resolution_details').val(data.resolution_details);
+                $('#incident_status').val(data.status);
+                $('#incidentModal').modal('show');
+            })
+            .fail(function() {
+                alert('인시던트 정보를 불러오는데 실패했습니다.');
+            });
+    }
+
+    function deleteIncident(id) {
+        if (confirm('정말 삭제하시겠습니까?')) {
+            $.post('/storage/incident/delete', {id: id})
+                .done(function(response) {
+                    if (response.success) {
+                        alert('삭제되었습니다.');
+                        loadIncidents();
+                    } else {
+                        alert('삭제 실패: ' + response.message);
+                    }
+                })
+                .fail(function() {
+                    alert('서버 오류가 발생했습니다.');
+                });
+        }
+    }
+
+    $('#incidentForm').submit(function(e) {
+        e.preventDefault();
+        const formData = {
+            id: $('#incident_id').val(),
+            storage_id: $('#incident_storage_id').val(),
+            incident_date: $('#incident_date').val(),
+            completion_date: $('#completion_date').val(),
+            issue_description: $('#issue_description').val(),
+            resolution_details: $('#resolution_details').val(),
+            status: $('#incident_status').val()
+        };
+
+        const url = currentIncidentId ? '/storage/incident/update' : '/storage/incident/add';
+        $.post(url, formData)
+            .done(function(response) {
+                if (response.success) {
+                    alert(currentIncidentId ? '수정되었습니다.' : '추가되었습니다.');
+                    $('#incidentModal').modal('hide');
+                    loadIncidents();
+                } else {
+                    alert('오류: ' + response.message);
+                }
+            })
+            .fail(function() {
+                alert('서버 오류가 발생했습니다.');
+            });
+    });
+
+    // 할당/회수 관리
+    function addAllocation() {
+        $('#allocationModalTitle').text('할당/회수 추가');
+        $('#allocationForm')[0].reset();
+        $('#allocation_id').val('');
+        currentAllocationId = null;
+        $('#allocationModal').modal('show');
+    }
+
+    function editAllocation(id) {
+        $('#allocationModalTitle').text('할당/회수 수정');
+        currentAllocationId = id;
+
+        $.get('/storage/allocation/' + id)
+            .done(function(data) {
+                $('#allocation_id').val(data.id);
+                $('#action_type').val(data.action_type);
+                $('#action_date').val(data.action_date);
+                $('#target_storage').val(data.target_storage);
+                $('#target_system').val(data.target_system);
+                $('#capacity_change').val(data.capacity_change);
+                $('#performed_by').val(data.performed_by);
+                $('#allocation_description').val(data.description);
+                $('#allocationModal').modal('show');
+            })
+            .fail(function() {
+                alert('할당/회수 정보를 불러오는데 실패했습니다.');
+            });
+    }
+
+    function deleteAllocation(id) {
+        if (confirm('정말 삭제하시겠습니까?')) {
+            $.post('/storage/allocation/delete', {id: id})
+                .done(function(response) {
+                    if (response.success) {
+                        alert('삭제되었습니다.');
+                        loadAllocations();
+                    } else {
+                        alert('삭제 실패: ' + response.message);
+                    }
+                })
+                .fail(function() {
+                    alert('서버 오류가 발생했습니다.');
+                });
+        }
+    }
+
+    $('#allocationForm').submit(function(e) {
+        e.preventDefault();
+        const formData = {
+            id: $('#allocation_id').val(),
+            action_type: $('#action_type').val(),
+            action_date: $('#action_date').val(),
+            target_storage: $('#target_storage').val(),
+            target_system: $('#target_system').val(),
+            capacity_change: $('#capacity_change').val(),
+            performed_by: $('#performed_by').val(),
+            description: $('#allocation_description').val()
+        };
+
+        const url = currentAllocationId ? '/storage/allocation/update' : '/storage/allocation/add';
+        $.post(url, formData)
+            .done(function(response) {
+                if (response.success) {
+                    alert(currentAllocationId ? '수정되었습니다.' : '추가되었습니다.');
+                    $('#allocationModal').modal('hide');
+                    loadAllocations();
+                } else {
+                    alert('오류: ' + response.message);
+                }
+            })
+            .fail(function() {
+                alert('서버 오류가 발생했습니다.');
+            });
+    });
+
+    // 필터링 함수들
+    function filterIncidents() {
+        loadIncidents();
+    }
+
+    function filterAllocations() {
+        loadAllocations();
+    }
+
+    // 내보내기 함수들
+    function exportStorageData() {
+        const startDate = $('#start_date').val();
+        const endDate = $('#end_date').val();
+        window.location.href = `/storage/export_storage?start_date=${startDate}&end_date=${endDate}`;
+    }
+
+    function exportIncidents() {
+        const startDate = $('#incident_start_date').val();
+        const endDate = $('#incident_end_date').val();
+        window.location.href = `/storage/export_incidents?start_date=${startDate}&end_date=${endDate}`;
+    }
+
+    function exportAllocations() {
+        const startDate = $('#allocation_start_date').val();
+        const endDate = $('#allocation_end_date').val();
+        window.location.href = `/storage/export_allocations?start_date=${startDate}&end_date=${endDate}`;
+    }
+</script>
+<style>
+    .storage-card {
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    .storage-header {
+        padding: 15px;
+        border-radius: 10px 10px 0 0;
+    }
+    .capacity-bar {
+        height: 20px;
+        background-color: #e9ecef;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 10px 0;
+    }
+    .capacity-fill {
+        height: 100%;
+        transition: width 0.3s ease;
+    }
+    .capacity-fill.low { background-color: #28a745; }
+    .capacity-fill.medium { background-color: #ffc107; }
+    .capacity-fill.high { background-color: #fd7e14; }
+    .capacity-fill.critical { background-color: #dc3545; }
+    .nav-tabs .nav-link.active {
+        background-color: #007bff;
+        color: white;
+    }
+    .table-container {
+        margin-top: 20px;
+    }
+    .btn-edit-storage {
+        background-color: #17a2b8;
+        border-color: #17a2b8;
+    }
+    .dashboard-section {
+        background-color: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 30px;
+    }
+</style>
+{% endblock %}

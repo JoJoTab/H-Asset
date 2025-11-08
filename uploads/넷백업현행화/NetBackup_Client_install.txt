@@ -1,0 +1,104 @@
+1. * client 접속하여 df -h로 여유 사이즈 확인 (9.1.0.1 버전인 경우 최소 3기가 이상 여유공간 필요)
+
+2. * client의 /etc/hosts 파일에 ip 추가
+
+## Netbackup Appliance 5250 Master
+10.10.7.195	nbuapplmaster
+
+## Netbackup Appliance 5250 Media
+10.10.26.33	nbuappl01
+10.10.26.34	nbuappl02
+10.10.22.103	nbuappl03
+10.10.22.104	nbuappl04
+10.10.28.103	nbuappl05
+10.10.3.126	hliirnbuappl
+
+3. /etc/hosts 파일에 client ip 제대로 들어가있는지 확인 ifconfig와 비교할 것
+
+4. * nbuapplmaster, nbuappl01~05, hliirnbuappl 의 /etc/hosts 파일에 client의 ip 추가
+
+5. * nbuapplmaster, nbuappl01~05, hliirnbuappl 의 /etc/hosts 파일에 중복된  client ip 존재여부 확인
+
+
+6. client os 버전이 레드햇 7.9 미만일 경우 설치 파일 scp로 전송 받기: 
+s\cp -P 41 root@10.10.28.182:/tmp/Netbackup/*_9*.tar ./
+
+client os 버전이 레드햇 7.9 이상일 경우(레드햇8, 레드햇9포함) :
+s\cp -P 41 root@10.10.28.182:/tmp/Netbackup/*_10*.tar.gz ./
+
+레드햇 8, 9 버전인 경우 이것도 설치 필수
+s\cp -P 41 root@10.10.28.182:/tmp/Netbackup/*.rpm
+-> libnsl.so.1 (os 라이브러리 파일)
+
+
+9.1.0.1 버전인 경우 :
+# tar -xvf Netbackup9.1.0.1~.tar
+cd NetBackup_9.1.0.1_Linux_Client
+./install
+
+
+10.3.0.1 버전인 경우 :
+# tar -xvzf Netbackup10.3~.tar.gz
+cd NetBackup_10.3.0.1_Linux_Client
+./install
+중간에 token 물어볼 경우 TQDBJKJPUFSIEDGP 입력
+메모장에서 미리 입력해서 복사 붙여넣기 하는것이 좋음
+붙여넣어도 눈에 보이지 않음
+
+
+--------------------------------------------------------------------------------------------------------------
+설치 완료된 후 확인해야할 절차
+
+1. * client에서 넷백업 서비스 정상적으로 올라왔는지 확인
+# /usr/openv/netbackup/bin/bpps -x
+
+[root@hliprbaap02:/NetBackup_9.1.0.1_Linux_Client]cd /usr/openv/netbackup/bin
+[root@hliprbaap02:/usr/openv/netbackup/bin]./bpps -x
+NB Processes
+------------
+root     17195     1  0 16:20 ?        00:00:00 /usr/openv/netbackup/bin/vnetd -standalone
+root     17200     1  0 16:20 ?        00:00:00 /usr/openv/netbackup/bin/bpcd -standalone
+root     17238     1  0 16:20 ?        00:00:00 /usr/openv/netbackup/bin/vnetd -proxy inbound_proxy -number 0
+root     17239     1  0 16:20 ?        00:00:00 /usr/openv/netbackup/bin/vnetd -proxy outbound_proxy -number 0
+root     17257     1  0 16:20 ?        00:00:00 /usr/openv/netbackup/bin/nbdisco
+root     17331     1  0 16:20 ?        00:00:00 /usr/openv/netbackup/bin/bmrbd
+root     17333 17331  0 16:20 ?        00:00:00 [bmrbd] <defunct>
+root     17469     1  0 16:20 ?        00:00:00 /usr/openv/netbackup/bin/bpclntcmd -crl_download
+
+
+Shared Veritas Processes
+-------------------------
+root     14739     1  0 16:20 ?        00:00:00 /opt/VRTSpbx/bin/pbx_exchange
+
+-----------------------------------------------------------------------------------------------------
+2. client에서 
+vi /usr/openv/netbackup/bp.conf 편집 열어서 아래 내용 추가 후 저장
+
+SERVER = nbuapplmaster
+SERVER = nbuappl01
+SERVER = nbuappl02
+SERVER = nbuappl03
+SERVER = nbuappl04
+SERVER = nbuappl05
+SERVER = hliirnbuappl
+
+
+3. * client에서 master server로 통신연결 확인
+root@hliprbaap02:/usr/openv/netbackup/bin]./bpclntcmd -pn
+expecting response from server nbuapplmaster
+hliprbaap02 *NULL* 10.10.3.125 60809
+
+
+4. * master, media server에서 client로 통신연결 확인
+nbuapplmaster, nbuappl01~05, hliirnbuappl 
+bptestbpcd -client [hostname]
+ex :  bptestbpcd -client hliprbaap02
+정상적인 출력 : 3줄 나오면 정상
+
+5. client에서 설치 파일 삭제
+
+
+
+
+
+

@@ -1,0 +1,63 @@
+{% extends "base.html" %}    <!-- 상속 -->
+{% block content %}
+<div class="container">
+    <h1>총 자산 현황</h1>
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card border-primary text-center">
+                <div class="card-header">
+                    총 자산
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ data.total_assets }}</h5>
+                    <p class="card-text">전체 자산 개수</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-primary text-center">
+                <div class="card-header">
+                    물리 서버
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ data.physical_servers }}</h5>
+                    <p class="card-text">물리 서버 개수</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-primary text-center">
+                <div class="card-header">
+                    가상 서버
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ data.virtual_servers }}</h5>
+                    <p class="card-text">가상 서버 개수</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-primary text-center">
+                <div class="card-header">
+                    현재 연도 자산
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ data.current_year_assets }}</h5>
+                    <p class="card-text">현재 연도 자산 개수</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-primary text-center">
+                <div class="card-header">
+                    현재 월 자산
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ data.current_month_assets }}</h5>
+                    <p class="card-text">현재 월 자산 개수</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

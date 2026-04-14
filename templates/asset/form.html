@@ -1,0 +1,611 @@
+{% extends 'base.html' %}
+{% block content %}
+
+{# ── 타이틀 & 브레드크럼 ──────────────────────────────────── #}
+<h2>{% if mode == 'edit' %}자산 수정{% else %}자산 등록{% endif %}</h2>
+<hr class="divider"/>
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    {% for item in hierarchy %}
+      {% if item.active %}
+        <li class="breadcrumb-item active" aria-current="page">{{ item.name }}</li>
+      {% else %}
+        <li class="breadcrumb-item"><a href="{{ item.url }}">{{ item.name }}</a></li>
+      {% endif %}
+    {% endfor %}
+  </ol>
+</nav>
+
+{# ── 저장 성공 알람 (flash) ───────────────────────────────── #}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ 'success' if category == 'success' else 'warning' }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="close" data-dismiss="alert"><span>&times;</span></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+{# ── 메인 폼 ─────────────────────────────────────────────── #}
+<form id="assetForm"
+      action="{{ url_for('asset.edit_asset', pnum=data.pnum) if mode == 'edit' else url_for('asset.add_asset') }}"
+      method="POST">
+
+  {# ══════════════════════════════════════════════════════════
+     섹션 1. 기본 식별 정보
+  ══════════════════════════════════════════════════════════ #}
+  <div class="card mb-3">
+    <div class="card-header"><strong>기본 식별 정보</strong></div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-4 form-group">
+          <label>Hostname</label>
+          <input type="text" class="form-control" name="hostname"
+                 value="{{ data.hostname if data else '' }}">
+        </div>
+        <div class="col-md-4 form-group">
+          <label>서비스명</label>
+          <input type="text" class="form-control" name="servername"
+                 value="{{ data.servername if data else '' }}" required>
+        </div>
+        <div class="col-md-4 form-group">
+          <label>IP 주소 <small class="text-muted">(콤마로 구분하여 다중 입력)</small></label>
+          {% set ip_str = ips | map(attribute='ip') | join(',') if ips else '' %}
+          <input type="text" class="form-control" name="ip_raw"
+                 id="ip_raw" value="{{ ip_str }}"
+                 placeholder="예: 10.0.0.1, 10.0.0.2">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════════
+     섹션 2. 분류 정보
+  ══════════════════════════════════════════════════════════ #}
+  <div class="card mb-3">
+    <div class="card-header"><strong>분류 정보</strong></div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-3 form-group">
+          <label>그룹</label>
+          <select class="form-control" name="grp">
+            <option value="">-- 선택 --</option>
+            {% for g in options.grp %}
+              <option value="{{ g }}" {% if data and data.grp == g %}selected{% endif %}>{{ g }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 form-group">
+          <label>구분 (운영환경)</label>
+          <select class="form-control" name="oper">
+            <option value="">-- 선택 --</option>
+            {% for o in options.oper %}
+              <option value="{{ o }}" {% if data and data.oper == o %}selected{% endif %}>{{ o }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 form-group">
+          <label>위치</label>
+          <select class="form-control" name="center">
+            <option value="">-- 선택 --</option>
+            {% for c in options.center %}
+              <option value="{{ c }}" {% if data and data.center == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 form-group">
+          <label>망</label>
+          <select class="form-control" name="network_zone">
+            <option value="">-- 선택 --</option>
+            {% for nz in options.network_zone %}
+              <option value="{{ nz }}" {% if data and data.network_zone == nz %}selected{% endif %}>{{ nz }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-3 form-group">
+          <label>물리/논리</label>
+          <select class="form-control" name="asset_type">
+            {% for at in options.asset_type %}
+              <option value="{{ at }}" {% if data and data.asset_type == at %}selected{% endif %}>{{ at }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-9 form-group">
+          <label>용도 <small class="text-muted">(중복 선택 가능)</small></label>
+          <div class="d-flex flex-wrap">
+            {% set cur_purposes = (data.purpose or '').split(',') if data else [] %}
+            {% for p in options.purpose %}
+              <div class="form-check mr-3">
+                <input class="form-check-input" type="checkbox" name="purpose"
+                       value="{{ p }}" id="purpose_{{ p }}"
+                       {% if p in cur_purposes %}checked{% endif %}>
+                <label class="form-check-label" for="purpose_{{ p }}">{{ p }}</label>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════════
+     섹션 3. 물리 위치
+  ══════════════════════════════════════════════════════════ #}
+  <div class="card mb-3">
+    <div class="card-header"><strong>물리 위치</strong></div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-4 form-group">
+          <label>상면위치 (loc1)</label>
+          <div class="input-group">
+              <input type="text" class="form-control" id="loc1" name="loc1" value="{{ data.loc1 if data else '' }}">
+              {% if data and data.loc1 %}
+              <div class="input-group-append">
+                  <button type="button" class="btn btn-outline-secondary" id="viewRack" title="랙 실장도 보기">
+                      <i class="fas fa-server"></i> 실장도
+                  </button>
+              </div>
+              {% endif %}
+          </div>
+        </div>
+        <div class="col-md-4 form-group">
+          <label>상단번호 (loc2)</label>
+          <input type="number" class="form-control" name="loc2"
+                 value="{{ data.loc2 if data else '' }}">
+        </div>
+        <div class="col-md-4 form-group">
+          <label>상면크기 (U)</label>
+          <input type="number" class="form-control" name="usize" min="1"
+                 value="{{ data.usize if data else 1 }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════════
+     섹션 4. 하드웨어 정보
+  ══════════════════════════════════════════════════════════ #}
+  <div class="card mb-3">
+    <div class="card-header"><strong>하드웨어 정보</strong></div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-3 form-group">
+          <label>제조사</label>
+          <input type="text" class="form-control" name="maker"
+                 value="{{ data.maker if data else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>모델명</label>
+          <input type="text" class="form-control" name="model"
+                 value="{{ data.model if data else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>시리얼번호</label>
+          <input type="text" class="form-control" name="serial"
+                 value="{{ data.serial if data else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>OS</label>
+          <select class="form-control" name="os">
+            <option value="">-- 선택 --</option>
+            {% for o in options.os %}
+              <option value="{{ o }}" {% if data and data.os == o %}selected{% endif %}>{{ o }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-3 form-group">
+          <label>OS 버전</label>
+          <input type="text" class="form-control" name="osver"
+                 value="{{ data.osver if data else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>CPU Core 수</label>
+          <input type="number" class="form-control" name="cpucore"
+                 value="{{ data.cpucore if data else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>CPU 소켓 수</label>
+          <input type="number" class="form-control" name="cpusocket"
+                 value="{{ data.cpusocket if data else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>MEM (GB)</label>
+          <input type="number" step="0.1" class="form-control" name="memory"
+                 value="{{ data.memory if data else '' }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════════
+     섹션 5. 일자 정보
+  ══════════════════════════════════════════════════════════ #}
+  <div class="card mb-3">
+    <div class="card-header"><strong>일자 정보</strong></div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-3 form-group">
+          <label>도입일자</label>
+          <input type="date" class="form-control" name="datein"
+                 value="{{ data.datein | string if data and data.datein else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>폐기일자</label>
+          <input type="date" class="form-control" name="dateout"
+                 value="{{ data.dateout | string if data and data.dateout else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>HW EOS</label>
+          <input type="date" class="form-control" name="hw_eos"
+                 value="{{ data.hw_eos | string if data and data.hw_eos else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>HW EOSL</label>
+          <input type="date" class="form-control" name="hw_eosl"
+                 value="{{ data.hw_eosl | string if data and data.hw_eosl else '' }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════════
+     섹션 6. 운영 / 전원 / 담당자
+  ══════════════════════════════════════════════════════════ #}
+  <div class="card mb-3">
+    <div class="card-header"><strong>운영 정보</strong></div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-2 form-group">
+          <label>자산상태</label>
+          <select class="form-control" name="status">
+            {% for s in options.status %}
+              <option value="{{ s }}" {% if data and data.status == s %}selected{% elif not data and s == '사용' %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2 form-group">
+          <label>중요도</label>
+          <select class="form-control" name="importance">
+            {% for im in options.importance %}
+              <option value="{{ im }}" {% if data and data.importance == im %}selected{% elif not data and im == '일반' %}selected{% endif %}>{{ im }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 form-group">
+          <label>전원이중화</label>
+          <select class="form-control" name="power">
+            <option value="">-- 선택 --</option>
+            {% for pw in options.power %}
+              <option value="{{ pw }}" {% if data and data.power == pw %}selected{% endif %}>{{ pw }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2 form-group">
+          <label>소비전력량 (W)</label>
+          <input type="number" step="0.1" class="form-control" name="watt"
+                 value="{{ data.watt if data else '' }}">
+        </div>
+        <div class="col-md-3 form-group">
+          <label>사용전류 (A)</label>
+          <input type="number" step="0.01" class="form-control" name="ampere"
+                 value="{{ data.ampere if data else '' }}">
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-4 form-group">
+          <label>담당자 (정)</label>
+          <input type="text" class="form-control" name="charge"
+                 value="{{ data.charge if data else '' }}">
+        </div>
+        <div class="col-md-4 form-group">
+          <label>담당자 (부)</label>
+          <input type="text" class="form-control" name="charge2"
+                 value="{{ data.charge2 if data else '' }}">
+        </div>
+        <div class="col-md-4 form-group">
+          <label>서비스담당자</label>
+          <input type="text" class="form-control" name="charge3"
+                 value="{{ data.charge3 if data else '' }}">
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-12 form-group">
+          <label>메모</label>
+          <textarea class="form-control" name="memo" rows="2">{{ data.memo if data else '' }}</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════════
+     섹션 7. 탭: 연계정보 / 자산관계 / 백업·서비스·소프트웨어
+  ══════════════════════════════════════════════════════════ #}
+  <div class="card mb-3">
+    <div class="card-header p-0">
+      <ul class="nav nav-tabs" id="relTabs" role="tablist">
+        <li class="nav-item">
+          <a class="nav-link active" id="tab-link" data-toggle="tab" href="#pane-link">연계 시스템</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" id="tab-relation" data-toggle="tab" href="#pane-relation">자산 관계</a>
+        </li>
+        {% if mode == 'edit' %}
+        <li class="nav-item">
+          <a class="nav-link" id="tab-service" data-toggle="tab" href="#pane-service">연계 서비스</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" id="tab-sw" data-toggle="tab" href="#pane-sw">연계 소프트웨어</a>
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+    <div class="card-body tab-content" id="relTabsContent">
+
+      {# ── 탭 1: 연계 시스템 ─────────────────────────────── #}
+      <div class="tab-pane fade show active" id="pane-link">
+        <p class="text-muted small mb-2">ITSM, ITMS, HiON 등 외부 시스템의 자산 번호를 입력합니다.</p>
+        <table class="table table-sm table-bordered" id="linkTable">
+          <thead><tr><th>시스템 유형</th><th>자산 번호</th><th></th></tr></thead>
+          <tbody>
+            {% set cur_links = links if links else [] %}
+            {% for lk in cur_links %}
+            <tr>
+              <td>
+                <select class="form-control form-control-sm" name="link_type_{{ loop.index0 }}">
+                  {% for lt in options.link_type %}
+                    <option value="{{ lt }}" {% if lk.system_type == lt %}selected{% endif %}>{{ lt }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td><input type="text" class="form-control form-control-sm"
+                         name="link_id_{{ loop.index0 }}" value="{{ lk.system_id }}"></td>
+              <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">삭제</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addLinkRow()">+ 행 추가</button>
+      </div>
+
+      {# ── 탭 2: 자산 관계 ───────────────────────────────── #}
+      {% set ns = namespace(parent_idx=0) %}
+      <div class="tab-pane fade" id="pane-relation">
+        <p class="text-muted small mb-2">상위/하위 자산 관계. 행을 더블클릭하면 해당 자산 수정 페이지로 이동합니다. 상위 관계는 직접 편집, 하위 관계는 하위 자산 편집 페이지에서만 변경됩니다.</p>
+        <table class="table table-sm table-bordered table-hover" id="relTable">
+          <thead><tr><th style="width:70px">방향</th><th>대상 자산</th><th>관계 유형</th><th style="width:100px"></th></tr></thead>
+          <tbody>
+            {# ─ 상위 자산: 현재 자산이 child (편집 가능) ─ #}
+            {% for rel in (relations or []) %}
+              {% if data and rel.child_pnum == data.pnum %}
+              <tr style="cursor:pointer" ondblclick="location.href='/edit/{{ rel.parent_pnum }}'">
+                <td><span class="badge badge-info">상위</span></td>
+                <td>
+                  <input type="hidden" name="rel_parent_{{ ns.parent_idx }}" value="{{ rel.parent_pnum }}">
+                  <span class="badge badge-secondary">{{ rel.parent_pnum }}</span>
+                  {{ rel.parent_servername or rel.parent_hostname or '' }}
+                </td>
+                <td>
+                  <select class="form-control form-control-sm" name="rel_type_{{ ns.parent_idx }}">
+                    {% for rt in options.relation_type %}
+                      <option value="{{ rt }}" {% if rel.relation_type == rt %}selected{% endif %}>{{ rt }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td><button type="button" class="btn btn-sm btn-outline-danger"
+                            onclick="event.stopPropagation();removeRow(this)">삭제</button></td>
+              </tr>
+              {% set ns.parent_idx = ns.parent_idx + 1 %}
+              {% endif %}
+            {% endfor %}
+            {# ─ 하위 자산: 현재 자산이 parent (읽기 전용) ─ #}
+            {% for rel in (relations or []) %}
+              {% if data and rel.parent_pnum == data.pnum %}
+              <tr class="table-light" style="cursor:pointer" ondblclick="location.href='/edit/{{ rel.child_pnum }}'">
+                <td><span class="badge badge-warning">하위</span></td>
+                <td>
+                  <span class="badge badge-secondary">{{ rel.child_pnum }}</span>
+                  {{ rel.child_servername or rel.child_hostname or '' }}
+                </td>
+                <td>{{ rel.relation_type }}</td>
+                <td><span class="text-muted small">하위 자산에서 변경</span></td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="input-group mb-2" style="max-width:450px;">
+          <input type="text" id="relSearch" class="form-control form-control-sm"
+                 placeholder="상위 자산 서버명/Hostname/IP 검색">
+          <div class="input-group-append">
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="searchRelAsset()">검색</button>
+          </div>
+        </div>
+        <ul id="relSearchResult" class="list-group mb-2" style="max-width:450px;display:none;"></ul>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addRelRow()">+ 직접 입력</button>
+      </div>
+
+      {% if mode == 'edit' %}
+      {# ── 탭 3: 연계 서비스 ─────────────────────────────── #}
+      <div class="tab-pane fade" id="pane-service">
+        {% if linked_services %}
+        <table class="table table-sm table-hover">
+          <thead><tr><th>#</th><th>서비스명</th><th>서비스 코드</th></tr></thead>
+          <tbody>
+            {% for sv in linked_services %}
+            <tr style="cursor:pointer" ondblclick="location.href='/service/edit/{{ sv.app_idx }}'">
+              <td>{{ loop.index }}</td>
+              <td>{{ sv.app_name }}</td>
+              <td>{{ sv.app_servicecode or '' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+          <p class="text-muted">연계된 서비스가 없습니다.</p>
+        {% endif %}
+      </div>
+
+      {# ── 탭 4: 연계 소프트웨어 ─────────────────────────── #}
+      <div class="tab-pane fade" id="pane-sw">
+        {% if linked_software %}
+        <table class="table table-sm table-hover">
+          <thead><tr><th>#</th><th>소프트웨어명</th><th>버전</th><th>유형</th><th>상태</th></tr></thead>
+          <tbody>
+            {% for sw in linked_software %}
+            <tr style="cursor:pointer" ondblclick="location.href='/service/software/edit/{{ sw.sw_idx }}'">
+              <td>{{ loop.index }}</td>
+              <td>{{ sw.sw_name }}</td>
+              <td>{{ sw.sw_version }}</td>
+              <td>{{ sw.type_name }}</td>
+              <td>{{ sw.isoper_state }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+          <p class="text-muted">연계된 소프트웨어가 없습니다.</p>
+        {% endif %}
+      </div>
+      {% endif %}
+
+    </div>{# /tab-content #}
+  </div>
+
+  {# ── 버튼 ─────────────────────────────────────────────── #}
+  <div class="d-flex justify-content-between mb-4">
+    <a href="{{ url_for('asset.index_detail') }}" class="btn btn-secondary">취소</a>
+    <button type="button" class="btn btn-primary" onclick="confirmSave()">
+      {% if mode == 'edit' %}저장{% else %}등록{% endif %}
+    </button>
+  </div>
+
+</form>{# /assetForm #}
+
+{# ════════════════════════════════════════════════════════════
+   JavaScript
+════════════════════════════════════════════════════════════ #}
+<script>
+/* ── 저장 확인 alert ─────────────────────────────────────── */
+function confirmSave() {
+  const action = '{{ "수정" if mode == "edit" else "등록" }}';
+  if (confirm(`자산정보를 ${action}하시겠습니까?`)) {
+    document.getElementById('assetForm').submit();
+  }
+}
+
+/* ── 연계 시스템 행 추가/삭제 ─────────────────────────────── */
+let linkIdx = {{ links | length if links else 0 }};
+
+function addLinkRow() {
+  const tbody = document.querySelector('#linkTable tbody');
+  const types = {{ options.link_type | tojson }};
+  const opts  = types.map(t => `<option value="${t}">${t}</option>`).join('');
+  const row   = document.createElement('tr');
+  row.innerHTML = `
+    <td><select class="form-control form-control-sm" name="link_type_${linkIdx}">${opts}</select></td>
+    <td><input type="text" class="form-control form-control-sm" name="link_id_${linkIdx}" placeholder="자산번호"></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">삭제</button></td>`;
+  tbody.appendChild(row);
+  linkIdx++;
+}
+
+/* ── 자산관계 검색 ───────────────────────────────────────── */
+let relIdx = {{ ns.parent_idx }};
+
+function searchRelAsset() {
+  const term = document.getElementById('relSearch').value.trim();
+  if (!term) return;
+  fetch(`/search_assets?term=${encodeURIComponent(term)}`)
+    .then(r => r.json())
+    .then(data => {
+      const ul = document.getElementById('relSearchResult');
+      ul.innerHTML = '';
+      ul.style.display = data.length ? 'block' : 'none';
+      data.forEach(a => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item list-group-item-action py-1';
+        li.textContent = `[${a.pnum}] ${a.servername || ''} (${a.hostname || ''}) ${a.ip || ''}`;
+        li.onclick = () => applyRelAsset(a.pnum, a.servername || a.hostname);
+        ul.appendChild(li);
+      });
+    });
+}
+
+function applyRelAsset(pnum, name) {
+  document.getElementById('relSearchResult').style.display = 'none';
+  document.getElementById('relSearch').value = '';
+  addRelRowWithData(pnum, name);
+}
+
+function addRelRowWithData(pnum, name) {
+  const tbody = document.querySelector('#relTable tbody');
+  const types = {{ options.relation_type | tojson }};
+  const opts  = types.map(t => `<option value="${t}">${t}</option>`).join('');
+  const row   = document.createElement('tr');
+  row.style.cursor = 'pointer';
+  row.ondblclick = () => location.href = '/edit/' + pnum;
+  row.innerHTML = `
+    <td><span class="badge badge-info">상위</span></td>
+    <td>
+      <input type="hidden" name="rel_parent_${relIdx}" value="${pnum}">
+      <span class="badge badge-secondary">${pnum}</span> ${name}
+    </td>
+    <td><select class="form-control form-control-sm" name="rel_type_${relIdx}">${opts}</select></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation();removeRow(this)">삭제</button></td>`;
+  tbody.appendChild(row);
+  relIdx++;
+}
+
+function addRelRow() {
+  const tbody = document.querySelector('#relTable tbody');
+  const types = {{ options.relation_type | tojson }};
+  const opts  = types.map(t => `<option value="${t}">${t}</option>`).join('');
+  const row   = document.createElement('tr');
+  row.innerHTML = `
+    <td><span class="badge badge-info">상위</span></td>
+    <td>
+      <input type="number" class="form-control form-control-sm" name="rel_parent_${relIdx}"
+             placeholder="상위 자산 pnum">
+    </td>
+    <td><select class="form-control form-control-sm" name="rel_type_${relIdx}">${opts}</select></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">삭제</button></td>`;
+  tbody.appendChild(row);
+  relIdx++;
+}
+
+$('#viewRack').on('click', function() {
+    var loc1 = $('#loc1').val();
+    if (!loc1) {
+        alert('상면번호가 입력되지 않았습니다.');
+        return;
+    }
+
+    var parts = loc1.split('-');
+    if (parts.length !== 3) {
+        alert('상면번호 형식이 올바르지 않습니다. (예: 1F-R01-01)');
+        return;
+    }
+
+    var floor = parts[0];
+    var column = parts[1];
+    var location = parts[2];
+
+    window.location.href = '/rackview?floor=' + encodeURIComponent(floor) +
+        '&column=' + encodeURIComponent(column) +
+        '&location=' + encodeURIComponent(location);
+});
+
+
+/* ── 공통: 행 삭제 ───────────────────────────────────────── */
+function removeRow(btn) {
+  btn.closest('tr').remove();
+}
+</script>
+
+{% endblock %}

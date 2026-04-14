@@ -2,7 +2,6 @@ from flask import Flask, render_template, redirect, url_for, request, send_file,
 # from flask_ckeditor import CKEditor
 import pandas as pd
 import numpy as np
-import pymysql.cursors
 import openpyxl
 import plotly.express as px
 import os
@@ -18,8 +17,24 @@ from blueprints.file import file_bp
 from blueprints.trend import trend_bp
 from blueprints.service import service_bp
 from blueprints.database import database_bp
-from blueprints.backup import backup_bp
-from utils.db import init_db_pool, close_db_pool
+from blueprints.backup import backup_bp, setup_auto_backup_history
+from blueprints.vmware import vmware_bp
+from blueprints.firewall import firewall_bp
+
+from utils.db import (
+    init_db_pool, close_db_pool,
+    get_all_storage, get_storage_latest_dates, get_storage_by_date_range,
+    check_storage_dates, insert_storage_row,
+    get_all_assets,
+    get_asset_os_list, get_asset_os_with_date,
+    get_distinct_loc1, get_rack_info_by_locs, upsert_rack_info,
+    get_physical_asset_locs, get_all_rack_info, get_rack_assets,
+    get_locations_by_floor_column, get_columns_by_floor,
+    insert_assets_bulk, insert_rv_assets_bulk,
+    get_assets_with_info, get_assets_for_graph,
+    get_info_options, get_asset_with_options,
+    lookup_info_code, insert_asset, update_asset, delete_asset,
+)
 from utils.auto_register import setup_auto_register
 from utils.auto_storage import setup_auto_storage
 
@@ -43,15 +58,19 @@ app.register_blueprint(storage_bp)
 app.register_blueprint(service_bp, url_prefix='/service')
 app.register_blueprint(database_bp, url_prefix='/database')
 app.register_blueprint(backup_bp, ur_plrefix='/backup')
+app.register_blueprint(vmware_bp, url_prefix='/vmware')
+app.register_blueprint(firewall_bp, url_prefix='/firewall')
 
-# setup_auto_register()
+setup_auto_register()
 setup_auto_storage()
+setup_auto_backup_history()
 
 # 비동기 함수 호출 제거
 @app.before_first_request
 def setup():
-    # 비동기 함수를 동기 함수로 변경
     init_db_pool()
+    from utils.firewall_collector import start_scheduler
+    start_scheduler()
     print("애플리케이션 초기화 완료")
 
 @app.teardown_appcontext
@@ -65,33 +84,13 @@ def main_index():
     # 비동기 함수를 직접 호출하지 않고 동기 버전의 함수 호출
     return redirect(url_for('asset.index'))
 
-def get_db_connection():
-    return pymysql.connect(
-        host="localhost",
-        user="root",
-        passwd="a980911",
-        db="hli_asset",
-        charset="utf8",
-        cursorclass=pymysql.cursors.DictCursor
-    )
-
 
 def get_data():
-    # 데이터베이스 연결
-    connection = get_db_connection()
-    try:
-        with connection.cursor() as cursor:
-            # 전체 데이터 조회
-            query = "SELECT * FROM total_asset"
-            cursor.execute(query)
-            data = cursor.fetchall()
-            columns = [column[0] for column in cursor.description]
-            df = pd.DataFrame(data, columns=columns)
+    data = get_all_assets()
+    df = pd.DataFrame(data)
 
-            # 날짜 형식 변환 (오류를 피하기 위해 errors='coerce' 사용)
-            df['datein'] = pd.to_datetime(df['datein'], errors='coerce')
-    finally:
-        connection.close()
+    # 날짜 형식 변환 (오류를 피하기 위해 errors='coerce' 사용)
+    df['datein'] = pd.to_datetime(df['datein'], errors='coerce')
 
     # 개수 계산
     total_assets = df[df['isoper'].isin([0, 1, 2])]
@@ -123,168 +122,124 @@ def get_data():
         "current_month": current_month
     }
 
-def insert_data(date, storage_type, pid, av_cap, tp_cap, tl_cap):
-    connection = get_db_connection()
-    try:
-        with connection.cursor() as cursor:
-            sql = "INSERT INTO total_storage (DATEIN, STORAGE, PID, AV_CAP, TP_CAP, TL_CAP) VALUES (%s, %s, %s, %s, %s, %s)"
-            cursor.execute(sql, (date, storage_type, pid, av_cap, tp_cap, tl_cap))
-        connection.commit()
-    finally:
-        connection.close()
 
 @app.route('/storage', methods=['GET', 'POST'])
 def storage():
-    connection = get_db_connection()
     data1 = {}
     data2 = []
-    end_date = None
-    start_date = None
     error_message = None
-    try:
-        with connection.cursor() as cursor:
-            # 전체 데이터 조회
-            sql = "SELECT DATEIN, STORAGE, PID, AV_CAP, TP_CAP, TL_CAP FROM total_storage"
+    graph_html_tl = ''
+    graph_html_use = ''
 
-            cursor.execute(sql)
-            result = cursor.fetchall()
+    result = get_all_storage()
+    end_date, start_date = get_storage_latest_dates()
 
-            # 장 최근 날짜 가져오기
-            sql_recent_date = """SELECT MAX(DATEIN) AS end_date FROM total_storage"""
-            sql_yesterday_date = """SELECT DATE_SUB(MAX(DATEIN), INTERVAL 1 DAY) AS start_date FROM total_storage"""
-            cursor.execute(sql_recent_date)
-            end_date = cursor.fetchone()['end_date']
-            cursor.execute(sql_yesterday_date)
-            start_date = cursor.fetchone()['start_date']
+    if request.method == 'POST':
+        start_date = request.form.get('start_date')
+        end_date = request.form.get('end_date')
 
-            if request.method == 'POST':
-                start_date = request.form.get('start_date')
-                end_date = request.form.get('end_date')
+    print(start_date, end_date)
 
-            print(start_date, end_date)
-            # 데이터 조회
-            sql_data = """
-                        SELECT STORAGE, PID, DATEIN, AV_CAP, TP_CAP, TL_CAP 
-                        FROM total_storage 
-                        WHERE DATEIN BETWEEN %s AND %s
-                        """
+    date_range_data = get_storage_by_date_range(start_date, end_date)
+    date_range_data = get_storage_by_date_range(start_date, end_date)
 
-            cursor.execute(sql_data, (start_date, end_date))
-            date_range_data = cursor.fetchall()
+    # 스토리지별로 날짜별 데이터를 저장할 딕셔너리 초기화
+    data_for_plot = {}
 
-            # 데이터 조회 후 추가
-            # SQL 쿼리로 데이터 조회
-            sql_data = """
-                        SELECT STORAGE, PID, DATEIN, AV_CAP, TP_CAP, TL_CAP 
-                        FROM total_storage 
-                        WHERE DATEIN BETWEEN %s AND %s
-                        """
+    for row in date_range_data:
+        date = row['DATEIN']
+        storage = row['STORAGE']
 
-            cursor.execute(sql_data, (start_date, end_date))
-            date_range_data = cursor.fetchall()
+        # 할당률 및 사용률 계산
+        tl_rate = row['TL_CAP'] * 100 / row['TP_CAP'] if row['TP_CAP'] > 0 else 0
+        use_rate = (row['TP_CAP'] - row['AV_CAP']) * 100 / row['TL_CAP'] if row['TL_CAP'] > 0 else 0
 
-            # 스토리지별로 날짜별 데이터를 저장할 딕셔너리 초기화
-            data_for_plot = {}
+        # 날짜별로 스토리지 데이터를 누적
+        if storage not in data_for_plot:
+            data_for_plot[storage] = {}
 
-            for row in date_range_data:
-                date = row['DATEIN']
-                storage = row['STORAGE']
+        if date not in data_for_plot[storage]:
+            data_for_plot[storage][date] = {
+                'tl_rates': [],
+                'use_rates': []
+            }
 
-                # 할당률 및 사용률 계산
-                tl_rate = row['TL_CAP'] * 100 / row['TP_CAP'] if row['TP_CAP'] > 0 else 0
-                use_rate = (row['TP_CAP'] - row['AV_CAP']) * 100 / row['TL_CAP'] if row['TL_CAP'] > 0 else 0
+        data_for_plot[storage][date]['tl_rates'].append(tl_rate)
+        data_for_plot[storage][date]['use_rates'].append(use_rate)
 
-                # 날짜별로 스토리지 데이터를 누적
-                if storage not in data_for_plot:
-                    data_for_plot[storage] = {}
+    # 최종 데이터 구조화
+    final_data_for_plot = {'dates': [], 'storages': [], 'tl_rates': [], 'use_rates': []}
+    for storage, date_data in data_for_plot.items():
+        for date, rates in date_data.items():
+            avg_tl_rate = sum(rates['tl_rates']) / len(rates['tl_rates']) if rates['tl_rates'] else 0
+            avg_use_rate = sum(rates['use_rates']) / len(rates['use_rates']) if rates['use_rates'] else 0
 
-                if date not in data_for_plot[storage]:
-                    data_for_plot[storage][date] = {
-                        'tl_rates': [],
-                        'use_rates': []
-                    }
+            final_data_for_plot['dates'].append(date)
+            final_data_for_plot['storages'].append(storage)
+            final_data_for_plot['tl_rates'].append(avg_tl_rate)
+            final_data_for_plot['use_rates'].append(avg_use_rate)
 
-                data_for_plot[storage][date]['tl_rates'].append(tl_rate)
-                data_for_plot[storage][date]['use_rates'].append(use_rate)
+    # DataFrame 생성
+    df = pd.DataFrame(final_data_for_plot)
 
-            # 최종 데이터 구조화
-            final_data_for_plot = {'dates': [], 'storages': [], 'tl_rates': [], 'use_rates': []}
-            for storage, date_data in data_for_plot.items():
-                for date, rates in date_data.items():
-                    avg_tl_rate = sum(rates['tl_rates']) / len(rates['tl_rates']) if rates['tl_rates'] else 0
-                    avg_use_rate = sum(rates['use_rates']) / len(rates['use_rates']) if rates['use_rates'] else 0
+    # 할당률 꺾은선 그래프 생성
+    fig_tl = px.line(df, x='dates', y='tl_rates', color='storages',
+                     labels={'tl_rates': '할당률 (%)', 'dates': '날짜'})
 
-                    final_data_for_plot['dates'].append(date)
-                    final_data_for_plot['storages'].append(storage)
-                    final_data_for_plot['tl_rates'].append(avg_tl_rate)
-                    final_data_for_plot['use_rates'].append(avg_use_rate)
+    # 사용률 꺾은선 그래프 생성
+    fig_use = px.line(df, x='dates', y='use_rates', color='storages',
+                      labels={'use_rates': '사용률 (%)', 'dates': '날짜'})
 
-            # DataFrame 생성
-            df = pd.DataFrame(final_data_for_plot)
+    # 그래프 HTML 코드로 변환
+    graph_html_tl = fig_tl.to_html(full_html=False)
+    graph_html_use = fig_use.to_html(full_html=False)
 
-            # 할당률 꺾은선 그래프 생성
-            fig_tl = px.line(df, x='dates', y='tl_rates', color='storages',
-                             labels={'tl_rates': '할당률 (%)', 'dates': '날짜'})
+    if not date_range_data:
+        # 시작 날짜와 종료 날짜의 데이터 유무 검사
+        existing_dates = {row['DATEIN'] for row in check_storage_dates(start_date, end_date)}
 
-            # 사용률 꺾은선 그래프 생성
-            fig_use = px.line(df, x='dates', y='use_rates', color='storages',
-                              labels={'use_rates': '사용률 (%)', 'dates': '날짜'})
+        # if start_date not in existing_dates:
+        #     error_message = '시작 날짜에 데이터가 없습니다.'
+        if end_date not in existing_dates:
+            error_message = '종료 날짜에 데이터가 없습니다.'
+    else:
+        # 데이터 비교 로직
+        filtered_data = [row for row in date_range_data if row['DATEIN'].strftime('%Y-%m-%d') == end_date]
+        for recent in filtered_data:
+            storage = recent['STORAGE']
+            pid = recent['PID']
+            if storage not in data1:
+                data1[storage] = {}
 
-            # 그래프 HTML 코드로 변환
-            graph_html_tl = fig_tl.to_html(full_html=False)
-            graph_html_use = fig_use.to_html(full_html=False)
+            data1[storage][pid] = {
+                'AV_CAP': recent['AV_CAP'] / 1024 / 1024,  # TB로 변환
+                'TP_CAP': recent['TP_CAP'] / 1024 / 1024,
+                'TL_CAP': recent['TL_CAP'] / 1024 / 1024,
+                'AV_CAP_diff': None,  # 초기화
+                'TP_CAP_diff': None,
+                'TL_CAP_diff': None,
+                'TL_RATE': recent['TL_CAP'] * 100 / recent['TP_CAP'] if recent['TP_CAP'] > 0 else 0,
+                'USE_RATE': (recent['TP_CAP'] - recent['AV_CAP']) * 100 / recent['TL_CAP'] if recent['TL_CAP'] > 0 else 0
+            }
+        filtered_data = [row for row in date_range_data if row['DATEIN'].strftime('%Y-%m-%d') == start_date]
+        for yesterday in filtered_data:
+            storage = yesterday['STORAGE']
+            pid = yesterday['PID']
+            if storage in data1 and pid in data1[storage]:
+                # 차이 계산
+                diff = round(data1[storage][pid]['AV_CAP'] - (yesterday['AV_CAP'] / 1024 / 1024), 2)
+                data1[storage][pid]['AV_CAP_diff'] = f"({diff:+})"  # 차이를 포맷팅
+                diff = round(data1[storage][pid]['TP_CAP'] - (yesterday['TP_CAP'] / 1024 / 1024), 2)
+                data1[storage][pid]['TP_CAP_diff'] = f"({diff:+})"  # 차이를 포맷팅
+                diff = round(data1[storage][pid]['TL_CAP'] - (yesterday['TL_CAP'] / 1024 / 1024), 2)
+                data1[storage][pid]['TL_CAP_diff'] = f"({diff:+})"  # 차이를 포맷팅
 
-            if not date_range_data:
-                # 시작 날짜와 종료 날짜의 데이터 유무 검사
-                sql_check_data = """SELECT DATEIN FROM total_storage WHERE DATEIN IN (%s, %s)"""
-                cursor.execute(sql_check_data, (start_date, end_date))
-                existing_dates = {row['DATEIN'] for row in cursor.fetchall()}
-
-                # if start_date not in existing_dates:
-                #     error_message = '시작 날짜에 데이터가 없습니다.'
-                if end_date not in existing_dates:
-                    error_message = '종료 날짜에 데이터가 없습니다.'
-            else:
-                # 데이터 비교 로직
-                filtered_data = [row for row in date_range_data if row['DATEIN'].strftime('%Y-%m-%d') == end_date]
-                for recent in filtered_data:
-                    storage = recent['STORAGE']
-                    pid = recent['PID']
-                    if storage not in data1:
-                        data1[storage] = {}
-
-                    data1[storage][pid] = {
-                        'AV_CAP': recent['AV_CAP'] / 1024 / 1024,  # TB로 변환
-                        'TP_CAP': recent['TP_CAP'] / 1024 / 1024,
-                        'TL_CAP': recent['TL_CAP'] / 1024 / 1024,
-                        'AV_CAP_diff': None,  # 초기화
-                        'TP_CAP_diff': None,
-                        'TL_CAP_diff': None,
-                        'TL_RATE': recent['TL_CAP'] * 100 / recent['TP_CAP'] if recent['TP_CAP'] > 0 else 0,
-                        'USE_RATE': (recent['TP_CAP'] - recent['AV_CAP']) * 100 / recent['TL_CAP'] if recent['TL_CAP'] > 0 else 0
-                    }
-                filtered_data = [row for row in date_range_data if row['DATEIN'].strftime('%Y-%m-%d') == start_date]
-                for yesterday in filtered_data:
-                    storage = yesterday['STORAGE']
-                    pid = yesterday['PID']
-                    if storage in data1 and pid in data1[storage]:
-                        # 차이 계산
-                        diff = round(data1[storage][pid]['AV_CAP'] - (yesterday['AV_CAP'] / 1024 / 1024), 2)
-                        data1[storage][pid]['AV_CAP_diff'] = f"({diff:+})"  # 차이를 포맷팅
-                        diff = round(data1[storage][pid]['TP_CAP'] - (yesterday['TP_CAP'] / 1024 / 1024), 2)
-                        data1[storage][pid]['TP_CAP_diff'] = f"({diff:+})"  # 차이를 포맷팅
-                        diff = round(data1[storage][pid]['TL_CAP'] - (yesterday['TL_CAP'] / 1024 / 1024), 2)
-                        data1[storage][pid]['TL_CAP_diff'] = f"({diff:+})"  # 차이를 포맷팅
-
-            # MB를 TB로 변환하여 결과에 추가
-            for row in result:
-                row['AV_CAP'] = round(row['AV_CAP'] / 1024 / 1024, 2)  # TB 단위로 변환
-                row['TP_CAP'] = round(row['TP_CAP'] / 1024 / 1024, 2)
-                row['TL_CAP'] = round(row['TL_CAP'] / 1024 / 1024, 2)
-                data2.append(row)
-
-    finally:
-        connection.close()
+    # MB를 TB로 변환하여 결과에 추가
+    for row in result:
+        row['AV_CAP'] = round(row['AV_CAP'] / 1024 / 1024, 2)  # TB 단위로 변환
+        row['TP_CAP'] = round(row['TP_CAP'] / 1024 / 1024, 2)
+        row['TL_CAP'] = round(row['TL_CAP'] / 1024 / 1024, 2)
+        data2.append(row)
 
     return render_template('storage.html', data1=data1, data2=data2, latest_date=end_date,
                            start_date=start_date, end_date=end_date, error_message=error_message,
@@ -317,7 +272,7 @@ def storage_upload():
                 av_cap = data[3]
                 tp_cap = data[4]
                 tl_cap = data[10]
-                insert_data(date, storage_type, pid, av_cap, tp_cap, tl_cap)
+                insert_storage_row(date, storage_type, pid, av_cap, tp_cap, tl_cap)
 
     print(date, storage_type, pid, av_cap, tp_cap, tl_cap)
 
@@ -326,21 +281,8 @@ def storage_upload():
 
 @app.route('/trend_os')
 def trend_os():
-    sql = """
-            SELECT io_os.state AS os
-            FROM hli_asset.total_asset ta 
-            JOIN hli_asset.info_os io_os ON ta.os = io_os.os
-            """
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql)
-            data = cursor.fetchall()
-            columns = [column[0] for column in cursor.description]
-            df = pd.DataFrame(data, columns=columns)
-            cursor.close()
-    finally:
-        db.close()
+    data = get_asset_os_list()
+    df = pd.DataFrame(data)
 
     # OS 종류별 자산 수 집계
     os_counts = df['os'].value_counts().reset_index()
@@ -356,21 +298,8 @@ def trend_os():
 
 @app.route('/trend_os_date')
 def trend_os_date():
-    sql_filtered = """
-                SELECT ta.datein,
-                       io_os.state AS os
-                FROM hli_asset.total_asset ta 
-                JOIN hli_asset.info_os io_os ON ta.os = io_os.os
-                """
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql_filtered)
-            data = cursor.fetchall()
-            columns = [column[0] for column in cursor.description]
-            df = pd.DataFrame(data, columns=columns)
-    finally:
-        db.close()
+    data = get_asset_os_with_date()
+    df = pd.DataFrame(data)
 
     # 날짜 형식 변환
     df['datein'] = pd.to_datetime(df['datein'])
@@ -438,70 +367,23 @@ def racklayout_edit():
         if loc:
             rackname = request.form.get(f'rackname_{loc}', '')
             rackenable = int(request.form.get(f'rackenable_{loc}', 1))
-
-            # loc에 해당하는 rack_info 업데이트 또는 삽입
-            sql_check = "SELECT COUNT(*) as count FROM rack_info WHERE loc = %s"
-            try:
-                db = get_db_connection()
-                with db.cursor() as cursor:
-                    cursor.execute(sql_check, (loc,))
-                    result = cursor.fetchone()
-                    exists = result['count'] if result else 0  # 결과가 없으면 0으로 설정
-
-                    if exists > 0:
-                        # 존재하면 업데이트
-                        sql_update = """
-                        UPDATE rack_info 
-                        SET rackname = %s, rackenable = %s 
-                        WHERE loc = %s
-                        """
-                        cursor.execute(sql_update, (rackname, rackenable, loc))
-                    else:
-                        # 존재하지 않으면 삽입
-                        sql_insert = """
-                        INSERT INTO rack_info (loc, rackname, rackenable) 
-                        VALUES (%s, %s, %s)
-                        """
-                        cursor.execute(sql_insert, (loc, rackname, rackenable))
-
-                    db.commit()  # 모든 변경사항을 커밋
-            finally:
-                db.close()
+            upsert_rack_info(loc, rackname, rackenable)
 
     # loc1 정보 조회
-    sql_loc = "SELECT DISTINCT loc1 FROM total_asset"
-    sql_select = "SELECT loc, rackname, rackenable FROM rack_info WHERE loc IN %s"
-    try:
-        db = get_db_connection()
-        with db.cursor() as cursor:
-            cursor.execute(sql_loc)
-            loc_data = cursor.fetchall()
+    loc_data = get_distinct_loc1()
+    loc_list = sorted([row['loc1'] for row in loc_data if row['loc1'] is not None])
 
-            # loc_data에서 loc1 값 추출 및 정렬
-            loc_list = sorted([row['loc1'] for row in loc_data if row['loc1'] is not None])  # 각 딕셔너리에서 'loc1' 값을 가져와 정렬
-
-            cursor.execute(sql_select, (tuple(loc_list),))
-            current_data = cursor.fetchall()
-    finally:
-        db.close()
+    current_data = get_rack_info_by_locs(loc_list)
 
     # 데이터 사전 생성
-    current_dict = {row['loc']: (row['rackname'], row['rackenable']) for row in current_data}  # 딕셔너리에서 키 사용
+    current_dict = {row['loc']: (row['rackname'], row['rackenable']) for row in current_data}
 
     return render_template('racklayout_edit.html', loc_list=loc_list, current_dict=current_dict)
 
 
 @app.route('/racklayout', methods=['GET'])
 def racklayout():
-    sql = "SELECT loc1 FROM total_asset WHERE isvm = 0"
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql)
-            data = cursor.fetchall()
-    finally:
-        db.close()
-
+    data = get_physical_asset_locs()
     df = pd.DataFrame(data, columns=['loc1'])
     df = df.dropna(subset=['loc1'])
 
@@ -524,16 +406,8 @@ def racklayout():
         floor_columns[floor].add(column)
 
     # 랙 정보 가져오기
-    db = get_db_connection()
-    sql_rack_info = "SELECT loc, rackname, rackenable FROM rack_info"
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql_rack_info)
-            rack_info_data = cursor.fetchall()
-            columns = [column[0] for column in cursor.description]
-    finally:
-        db.close()
-    df_rack = pd.DataFrame(rack_info_data, columns=columns)
+    rack_info_data = get_all_rack_info()
+    df_rack = pd.DataFrame(rack_info_data)
     df_rack['loc'] = df_rack['loc'].apply(lambda x: x[:-4] + x[-3:-2] + '-' + x[-2:])
     rack_info_dict = {row['loc']: (row['rackname'], row['rackenable']) for index, row in df_rack.iterrows()}
 
@@ -563,20 +437,8 @@ def racklayout():
 @app.route('/rack_export', methods=['GET', 'POST'])
 def rack_export():
     # 현재 테이블 데이터 가져오기
-    sql = "SELECT loc1, loc2, servername, charge, maker, model, usize FROM total_asset"
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql)
-            data = cursor.fetchall()
-    finally:
-        db.close()
-
-    # 컬럼 이름 가져오기
-    columns = [column[0] for column in cursor.description]
-
-    # DataFrame 생성
-    df = pd.DataFrame(data, columns=columns)
+    data = get_rack_assets()
+    df = pd.DataFrame(data)
 
     # loc1의 값이 없는 행 제거
     df = df.dropna(subset=['loc1'])
@@ -584,7 +446,6 @@ def rack_export():
     selected_floor = request.form.get('floor')
     selected_column = request.form.get('column')
     selected_location = request.form.get('location')
-
 
     filtered_df = df[df['loc1'] == f"{selected_floor}-{selected_column}-{selected_location}"]
     filtered_df = filtered_df[['loc2', 'model', 'servername', 'charge', 'usize']]
@@ -659,18 +520,8 @@ def rack_export():
 
 @app.route('/rackview', methods=['GET', 'POST'])
 def rackview():
-    sql = "SELECT loc1, loc2, servername, charge, maker, model, usize FROM total_asset"
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql)
-            data = cursor.fetchall()
-            # 컬럼 이름 가져오기
-            columns = [column[0] for column in cursor.description]
-            # DataFrame 생성
-            df = pd.DataFrame(data, columns=columns)
-    finally:
-        db.close()
+    data = get_rack_assets()
+    df = pd.DataFrame(data)
 
     # loc1의 값이 없는 행 제거
     df = df.dropna(subset=['loc1'])
@@ -764,17 +615,10 @@ def get_locations():
     floor = request.args.get('floor')
     column = request.args.get('column')
 
-    sql = "SELECT loc1 FROM total_asset WHERE loc1 LIKE %s"
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql, (f"{floor}-{column}-%",))  # floor와 column에 따라 필터링
-            data = cursor.fetchall()
-    finally:
-        db.close()
+    data = get_locations_by_floor_column(floor, column)
 
     # loc1에서 위치만 추출
-    locations = set(loc['loc1'].split('-')[2] for loc in data)  # loc1에서 위치 추출
+    locations = set(loc['loc1'].split('-')[2] for loc in data)
 
     return jsonify(sorted(list(locations)))
 
@@ -782,18 +626,10 @@ def get_locations():
 def get_columns():
     floor = request.args.get('floor')
 
-    sql = "SELECT DISTINCT loc1 FROM total_asset WHERE loc1 LIKE %s"
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor = db.cursor()
-            cursor.execute(sql, (f"{floor}-%",))  # 선택된 floor에 대한 loc1 필터링
-            data = cursor.fetchall()
-    finally:
-        db.close()
+    data = get_columns_by_floor(floor)
 
     # loc1에서 column만 추출
-    columns = set(loc['loc1'].split('-')[1] for loc in data)  # loc1에서 column 추출
+    columns = set(loc['loc1'].split('-')[1] for loc in data)
 
     return jsonify(sorted(list(columns)))
 
@@ -886,17 +722,7 @@ def delete_page(filename):
 
 @app.route('/export')
 def export_asset():
-    # 데이터베이스에서 자산 데이터 가져오기
-    sql = "SELECT * FROM total_asset"
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql)
-            data = cursor.fetchall()
-    finally:
-        db.close()
-
-    # 데이터프레임 생성
+    data = get_all_assets()
     df = pd.DataFrame(data)
 
     # 엑셀 파일로 저장
@@ -939,44 +765,33 @@ def upload_file():
         df = pd.read_excel(filepath)
         df = df.replace({np.nan: None})
 
-        # 데이터베이스에 저장
-        db = get_db_connection()
-        try:
-            with db.cursor() as cursor:
-                # 유효성 검사 결과 저장
-                invalid_rows = []
+        # 유효성 검사 결과 저장
+        invalid_rows = []
 
-                for index, row in df.iterrows():
-                    try:
-                        df['isvm'] = df['isvm'].astype(int)
-                        df['isoper'] = df['isoper'].astype(int)
-                        df['oper'] = df['oper'].astype(int)
-                        df['power'] = df['power'].astype(int)
-                        df['power'] = df['domain'].astype(int)
-                    except (ValueError, TypeError):
-                        invalid_rows.append(index + 1)  # 변환 실패 시 유효하지 않은 행으로 간주
-                        print(ValueError, TypeError)
-                        continue
+        for index, row in df.iterrows():
+            try:
+                df['isvm'] = df['isvm'].astype(int)
+                df['isoper'] = df['isoper'].astype(int)
+                df['oper'] = df['oper'].astype(int)
+                df['power'] = df['power'].astype(int)
+                df['power'] = df['domain'].astype(int)
+            except (ValueError, TypeError):
+                invalid_rows.append(index + 1)  # 변환 실패 시 유효하지 않은 행으로 간주
+                print(ValueError, TypeError)
+                continue
 
-                # 모든 데이터가 유효할 경우 삽입
-                valid_data = []
-                for index, row in df.iterrows():
-                    valid_data.append((row['itamnum'], row['servername'], row['ip'],
-                                       row['hostname'], row['center'], row['loc1'],
-                                       row['loc2'], row['isvm'], row['vcenter'],
-                                       row['datein'], row['dateout'], row['charge'],
-                                       row['charge2'], row['isoper'], row['oper'],
-                                       row['power'], row['pdu'], row['os'], row['osver'],
-                                       row['maker'], row['model'], row['serial'], row['domain'], ['charge3']))
+        # 모든 데이터가 유효할 경우 삽입
+        valid_data = []
+        for index, row in df.iterrows():
+            valid_data.append((row['itamnum'], row['servername'], row['ip'],
+                               row['hostname'], row['center'], row['loc1'],
+                               row['loc2'], row['isvm'], row['vcenter'],
+                               row['datein'], row['dateout'], row['charge'],
+                               row['charge2'], row['isoper'], row['oper'],
+                               row['power'], row['pdu'], row['os'], row['osver'],
+                               row['maker'], row['model'], row['serial'], row['domain'], ['charge3']))
 
-                sql = """INSERT INTO total_asset (itamnum, servername, ip, hostname, center, loc1, loc2, isvm, vcenter, 
-                datein, dateout, charge, charge2, isoper, oper, power, pdu, os, osver, maker, model, serial, domain, 
-                charge3) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-                %s)"""
-                cursor.executemany(sql, valid_data)
-                db.commit()
-        finally:
-            db.close()
+        insert_assets_bulk(valid_data)
 
         return redirect(url_for('index'))
 
@@ -1018,18 +833,12 @@ def upload_rv_file():
 
         print(filter_df)
 
-        # 데이터베이스에 저장
-        db = get_db_connection()
-        cursor = db.cursor()
-
         # 유효성 검사 결과 저장
         invalid_rows = []
 
         for index, row in filter_df.iterrows():
             try:
                 filter_df['cpu'] = filter_df['cpu'].astype(int)
-                # filter_df['memory'] = df['memory'].astype(int)
-                # filter_df['oper'] = df['oper'].astype(int)
             except (ValueError, TypeError):
                 invalid_rows.append(index + 1)  # 변환 실패 시 유효하지 않은 행으로 간주
                 print(ValueError, TypeError)
@@ -1042,13 +851,7 @@ def upload_rv_file():
                                row['hostname'], row['center'], 1, row['Cluster'] + " " + row['Host'],
                                1, 1, row['os'], '서버', row['cpu'], row['memory']))
 
-        sql = """INSERT INTO total_asset (servername, ip, hostname, center, isvm, vcenter,
-        isoper, oper, os, domain, cpucore, memory) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-        cursor.executemany(sql, valid_data)
-        db.commit()
-
-        cursor.close()
-        db.close()
+        insert_rv_assets_bulk(valid_data)
 
         return redirect(url_for('index'))
 
@@ -1059,159 +862,37 @@ def index_detail():
     selected_columns = request.form.getlist('columns') if request.method == 'POST' else None
 
     if request.method == 'POST':
-        # SQL 쿼리 초기화
-        sql = """
-            SELECT ta.*, 
-                   id.state AS domain_state, 
-                   io_isoper.state AS isoper_state, 
-                   io_oper.state AS oper_state, 
-                   io_power.state AS power_state, 
-                   io_os.state AS os_state 
-            FROM total_asset ta 
-            JOIN info_domain id ON ta.domain = id.domain
-            LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
-            LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
-            LEFT JOIN info_power io_power ON ta.power = io_power.power
-            LEFT JOIN info_os io_os ON ta.os = io_os.os
-            WHERE 1=1
-            ORDER BY ta.dateinsert
-        """  # WHERE 절을 항상 true로 시작
-        params = []
-
-        # 입력값 가져오기
-        itamnum = request.form.get('itamnum', None)
-        servername = request.form.get('servername', None)
-        ip = request.form.get('ip', None)
-        hostname = request.form.get('hostname', None)
-        center = request.form.get('center', None)
-        loc1 = request.form.get('loc1', None)
-        loc2 = request.form.get('loc2', None, type=int)
-        isvm = request.form.get('isvm', None, type=int)
-        vcenter = request.form.get('vcenter', None, type=int)
-        datein = request.form.get('datein', None)
-        dateout = request.form.get('dateout', None)
-        charge = request.form.get('charge', None)
-        charge2 = request.form.get('charge2', None)
-        isoper = request.form.get('isoper', None, type=int)
-        oper = request.form.get('oper', None, type=int)
-        power = request.form.get('power', None, type=int)
-        pdu = request.form.get('pdu', None)
-        os = request.form.get('os', None)
-        osver = request.form.get('osver', None)
-        maker = request.form.get('maker', None)
-        model = request.form.get('model', None)
-        serial = request.form.get('serial', None)
-        domain = request.form.get('domain', None)
-        charge3 = request.form.get('charge3', None)
-
-        # 조건 추가
-        if itamnum:
-            sql += " AND itamnum LIKE %s"
-            params.append(f'%{itamnum}%')
-        if servername:
-            sql += " AND servername LIKE %s"
-            params.append(f'%{servername}%')
-        if ip:
-            sql += " AND ip LIKE %s"
-            params.append(f'%{ip}%')
-        if hostname:
-            sql += " AND hostname LIKE %s"
-            params.append(f'%{hostname}%')
-        if center:
-            sql += " AND center LIKE %s"
-            params.append(f'%{center}%')
-        if loc1:
-            sql += " AND loc1 LIKE %s"
-            params.append(f'%{loc1}%')
-        if loc2 is not None:  # loc2가 0일 경우도 유효한 값으로 처리
-            sql += " AND loc2 = %s"
-            params.append(loc2)
-        if isvm is not None:
-            sql += " AND isvm = %s"
-            params.append(isvm)
-        if vcenter is not None:
-            sql += " AND vcenter = %s"
-            params.append(vcenter)
-        if datein:
-            sql += " AND datein LIKE %s"
-            params.append(f'%{datein}%')
-        if dateout:
-            sql += " AND dateout LIKE %s"
-            params.append(f'%{dateout}%')
-        if charge:
-            sql += " AND charge LIKE %s"
-            params.append(f'%{charge}%')
-        if charge2:
-            sql += " AND charge2 LIKE %s"
-            params.append(f'%{charge2}%')
-        if isoper is not None:
-            sql += " AND isoper = %s"
-            params.append(isoper)
-        if oper is not None:
-            sql += " AND oper = %s"
-            params.append(oper)
-        if power is not None:
-            sql += " AND power = %s"
-            params.append(power)
-        if pdu:
-            sql += " AND pdu LIKE %s"
-            params.append(f'%{pdu}%')
-        if os:
-            sql += " AND os LIKE %s"
-            params.append(f'%{os}%')
-        if osver:
-            sql += " AND osver LIKE %s"
-            params.append(f'%{osver}%')
-        if maker:
-            sql += " AND maker LIKE %s"
-            params.append(f'%{maker}%')
-        if model:
-            sql += " AND model LIKE %s"
-            params.append(f'%{model}%')
-        if serial:
-            sql += " AND serial LIKE %s"
-            params.append(f'%{serial}%')
-        if domain:
-            sql += " AND domain LIKE %s"
-            params.append(f'%{domain}%')
-        if charge3:
-            sql += " AND charge3 LIKE %s"
-            params.append(f'%{charge3}%')
-
-        # DB에서 데이터 가져오기
-        db = get_db_connection()
-        try:
-            with db.cursor() as cursor:
-                cursor.execute(sql, params)
-                data = cursor.fetchall()
-        finally:
-            db.close()
-
+        filters = {
+            'itamnum':   request.form.get('itamnum') or None,
+            'servername': request.form.get('servername') or None,
+            'ip':        request.form.get('ip') or None,
+            'hostname':  request.form.get('hostname') or None,
+            'center':    request.form.get('center') or None,
+            'loc1':      request.form.get('loc1') or None,
+            'loc2':      request.form.get('loc2', None, type=int),
+            'isvm':      request.form.get('isvm', None, type=int),
+            'vcenter':   request.form.get('vcenter', None, type=int),
+            'datein':    request.form.get('datein') or None,
+            'dateout':   request.form.get('dateout') or None,
+            'charge':    request.form.get('charge') or None,
+            'charge2':   request.form.get('charge2') or None,
+            'isoper':    request.form.get('isoper', None, type=int),
+            'oper':      request.form.get('oper', None, type=int),
+            'power':     request.form.get('power', None, type=int),
+            'pdu':       request.form.get('pdu') or None,
+            'os':        request.form.get('os') or None,
+            'osver':     request.form.get('osver') or None,
+            'maker':     request.form.get('maker') or None,
+            'model':     request.form.get('model') or None,
+            'serial':    request.form.get('serial') or None,
+            'domain':    request.form.get('domain') or None,
+            'charge3':   request.form.get('charge3') or None,
+        }
+        data = get_assets_with_info(filters)
         return render_template('index_detail.html', data=data, selected_columns=selected_columns)
 
     # GET 요청 시 전체 자산 조회
-    sql = """
-        SELECT ta.*, 
-               id.state AS domain_state, 
-               io_isoper.state AS isoper_state, 
-               io_oper.state AS oper_state, 
-               io_power.state AS power_state, 
-               io_os.state AS os_state 
-        FROM total_asset ta 
-        JOIN info_domain id ON ta.domain = id.domain
-        LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
-        LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
-        LEFT JOIN info_power io_power ON ta.power = io_power.power
-        LEFT JOIN info_os io_os ON ta.os = io_os.os
-    """
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql)
-            data = cursor.fetchall()
-    finally:
-        db.close()
-
+    data = get_assets_with_info()
     return render_template('index_detail.html', data=data, selected_columns=None)
 
 
@@ -1221,33 +902,8 @@ def index():
     # 오늘 날짜와 6개월 전 날짜 계산
     end_date = datetime.now()
 
-    # SQL 쿼리 작성
-    sql_graph = """
-                SELECT ta.*, 
-                       id.state AS domain_state, 
-                       io_isoper.state AS isoper_state, 
-                       io_oper.state AS oper_state, 
-                       io_power.state AS power_state, 
-                       io_os.state AS os_state 
-                FROM hli_asset.total_asset ta 
-                JOIN hli_asset.info_domain id ON ta.domain = id.domain
-                LEFT JOIN hli_asset.info_isoper io_isoper ON ta.isoper = io_isoper.isoper
-                LEFT JOIN hli_asset.info_oper io_oper ON ta.oper = io_oper.oper
-                LEFT JOIN hli_asset.info_power io_power ON ta.power = io_power.power
-                LEFT JOIN hli_asset.info_os io_os ON ta.os = io_os.os
-                ORDER BY ta.dateinsert
-                """
-
-    # 데이터베이스 연결
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql_graph)
-            data_graph = cursor.fetchall()
-            columns = [column[0] for column in cursor.description]
-            df_graph = pd.DataFrame(data_graph, columns=columns)
-    finally:
-        db.close()
+    data_graph = get_assets_for_graph()
+    df_graph = pd.DataFrame(data_graph)
 
     # 데이터 변환 및 집계
     df_graph['datein'] = pd.to_datetime(df_graph['datein'])
@@ -1295,32 +951,7 @@ def index():
 
 @app.route('/write')
 def write_asset():
-    db = get_db_connection()
-
-    try:
-        with db.cursor() as cursor:
-            # info_isoper 데이터 가져오기
-            cursor.execute("SELECT * FROM info_isoper")
-            isoper_options = cursor.fetchall()
-
-            # info_oper 데이터 가져오기
-            cursor.execute("SELECT * FROM info_oper")
-            oper_options = cursor.fetchall()
-
-            # info_power 데이터 가져오기
-            cursor.execute("SELECT * FROM info_power")
-            power_options = cursor.fetchall()
-
-            # info_os 데이터 가져오기
-            cursor.execute("SELECT * FROM info_os")
-            os_options = cursor.fetchall()
-
-            # info_domain 데이터 가져오기
-            cursor.execute("SELECT * FROM info_domain")
-            domain_options = cursor.fetchall()
-
-    finally:
-        db.close()
+    isoper_options, oper_options, power_options, os_options, domain_options = get_info_options()
     print(isoper_options, oper_options, power_options, os_options, domain_options)
     return render_template('write.html',
                            isoper_options=isoper_options,
@@ -1332,11 +963,6 @@ def write_asset():
 
 @app.route('/add', methods=['POST'])
 def add_asset():
-    sql = """INSERT INTO total_asset (itamnum, servername, ip, hostname, center, loc1, loc2, isvm, vcenter, 
-            datein, dateout, charge, charge2, isoper, oper, power, pdu, os, osver, maker, model, serial, domain, 
-            charge3) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-            %s)"""
-
     itamnum = request.form.get('itamnum')
     servername = request.form.get('servername')
     ip = request.form.get('ip')
@@ -1373,55 +999,22 @@ def add_asset():
     except ValueError:
         dateout = None  # 오류 발생 시 None으로 설정
 
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            # isoper
-            cursor.execute("SELECT isoper FROM hli_asset.info_isoper WHERE state = %s", (isoper,))
-            isoper_value = cursor.fetchone()
-            isoper = isoper_value['isoper'] if isoper_value else 0  # 딕셔너리에서 'isoper' 키로 값 가져오기
+    # state → 코드 변환
+    isoper = lookup_info_code('info_isoper', 'isoper', isoper) or 0
+    oper   = lookup_info_code('info_oper',   'oper',   oper)   or 0
+    power  = lookup_info_code('info_power',  'power',  power)  or 0
+    os     = lookup_info_code('info_os',     'os',     os)     or 0
+    domain = lookup_info_code('info_domain', 'domain', domain) or 0
 
-            # oper
-            cursor.execute("SELECT oper FROM hli_asset.info_oper WHERE state = %s", (oper,))
-            oper_value = cursor.fetchone()
-            oper = oper_value['oper'] if oper_value else 0  # 딕셔너리에서 'oper' 키로 값 가져오기
+    insert_asset((itamnum, servername, ip, hostname, center, loc1, loc2,
+                  isvm, vcenter, datein, dateout, charge, charge2,
+                  isoper, oper, power, pdu, os, osver, maker, model, serial, domain, charge3))
 
-            # power
-            cursor.execute("SELECT power FROM hli_asset.info_power WHERE state = %s", (power,))
-            power_value = cursor.fetchone()
-            power = power_value['power'] if power_value else 0  # 딕셔너리에서 'power' 키로 값 가져오기
-
-            # os
-            cursor.execute("SELECT os FROM hli_asset.info_os WHERE state = %s", (os,))
-            os_value = cursor.fetchone()
-            os = os_value['os'] if os_value else 0  # 딕셔너리에서 'os' 키로 값 가져오기
-
-            # domain
-            cursor.execute("SELECT domain FROM hli_asset.info_domain WHERE state = %s", (domain,))
-            domain_value = cursor.fetchone()
-            domain = domain_value['domain'] if domain_value else 0  # 딕셔너리에서 'domain' 키로 값 가져오기
-
-            # 데이터 삽입
-            cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
-                                 isvm, vcenter, datein, dateout, charge, charge2,
-                                 isoper, oper, power, pdu, os, osver, maker, model, serial, domain, charge3))
-            db.commit()
-    finally:
-        db.close()
     return redirect(url_for('index'))
 
 @app.route('/edit/<int:pnum>', methods=['GET', 'POST'])
 def edit_asset(pnum):
-    db = get_db_connection()
-
     if request.method == 'POST':
-        sql = """UPDATE total_asset SET itamnum = %s, servername = %s, ip = %s, 
-                      hostname = %s, center = %s, loc1 = %s, loc2 = %s, isvm = %s, 
-                      datein = %s, dateout = %s, charge = %s, charge2 = %s, 
-                      isoper = %s, oper = %s, power = %s, pdu = %s, os = %s, 
-                      osver = %s, maker = %s, model = %s, serial = %s, domain = %s, charge3 = %s 
-                      WHERE pnum = %s"""
-
         # 폼 데이터 가져오기
         itamnum = request.form.get('itamnum')
         servername = request.form.get('servername')
@@ -1460,83 +1053,22 @@ def edit_asset(pnum):
 
         print(isoper, oper, power, os, domain)
 
-        with db.cursor() as cursor:
-            # isoper
-            cursor.execute("SELECT isoper FROM info_isoper WHERE state = %s", (isoper,))
-            isoper_value = cursor.fetchone()  # fetchone() 사용
-            print(isoper_value)
-            isoper = isoper_value['isoper'] if isoper_value and len(isoper_value) > 0 else None
+        # state → 코드 변환
+        isoper = lookup_info_code('info_isoper', 'isoper', isoper)
+        oper   = lookup_info_code('info_oper',   'oper',   oper)
+        power  = lookup_info_code('info_power',  'power',  power)
+        os     = lookup_info_code('info_os',     'os',     os)
+        domain = lookup_info_code('info_domain', 'domain', domain)
+        print(domain)
 
-            # oper
-            cursor.execute("SELECT oper FROM info_oper WHERE state = %s", (oper,))
-            oper_value = cursor.fetchone()
-            oper = oper_value['oper'] if oper_value and len(oper_value) > 0 else None
-
-            # power
-            cursor.execute("SELECT power FROM info_power WHERE state = %s", (power,))
-            power_value = cursor.fetchone()
-            power = power_value['power'] if power_value and len(power_value) > 0 else None
-
-            # os
-            cursor.execute("SELECT os FROM info_os WHERE state = %s", (os,))
-            os_value = cursor.fetchone()
-            os = os_value['os'] if os_value and len(os_value) > 0 else None
-
-            # domain
-            cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (domain,))
-            domain_value = cursor.fetchone()
-            domain = domain_value['domain'] if domain_value and len(domain_value) > 0 else None
-            print(domain)
-
-        try:
-            with db.cursor() as cursor:
-                cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
-                                     isvm, datein, dateout, charge, charge2,
-                                     isoper, oper, power, pdu, os, osver, maker, model, serial, domain, charge3, pnum))
-                db.commit()
-        finally:
-            db.close()
+        update_asset(pnum, (itamnum, servername, ip, hostname, center, loc1, loc2,
+                             isvm, datein, dateout, charge, charge2,
+                             isoper, oper, power, pdu, os, osver, maker, model, serial, domain, charge3))
 
         return redirect(url_for('index_detail'))
 
     # GET 요청 시 데이터 가져오기
-    try:
-        with db.cursor() as cursor:
-            cursor.execute("""
-                SELECT ta.*, 
-                       io_isoper.state AS isoper, 
-                       io_oper.state AS oper,
-                       io_os.state AS os,
-                       io_domain.state AS domain,
-                       io_power.state AS power
-                FROM total_asset ta
-                LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
-                LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
-                LEFT JOIN info_os io_os ON ta.os = io_os.os
-                LEFT JOIN info_domain io_domain ON ta.domain = io_domain.domain
-                LEFT JOIN info_power io_power ON ta.power = io_power.power
-                WHERE ta.pnum = %s
-            """, (pnum,))
-            data = cursor.fetchone()
-
-            # 옵션 데이터를 가져오기
-            cursor.execute("SELECT * FROM info_isoper")
-            isoper_options = cursor.fetchall()
-
-            cursor.execute("SELECT * FROM info_oper")
-            oper_options = cursor.fetchall()
-
-            cursor.execute("SELECT * FROM info_os")
-            os_options = cursor.fetchall()
-
-            cursor.execute("SELECT * FROM info_domain")
-            domain_options = cursor.fetchall()
-
-            cursor.execute("SELECT * FROM info_power")
-            power_options = cursor.fetchall()
-
-    finally:
-        db.close()
+    data, isoper_options, oper_options, os_options, domain_options, power_options = get_asset_with_options(pnum)
 
     return render_template('edit.html', data=data,
                            isoper_options=isoper_options,
@@ -1547,18 +1079,9 @@ def edit_asset(pnum):
 
 
 @app.route('/delete/<int:pnum>')
-def delete_asset(pnum):
-    sql = "DELETE FROM total_asset WHERE pnum = %s"
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            cursor.execute(sql, (pnum,))
-            db.commit()
-    finally:
-        db.close()
+def delete_asset_route(pnum):
+    delete_asset(pnum)
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8000)
-
-

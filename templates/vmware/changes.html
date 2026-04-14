@@ -1,0 +1,155 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid d-flex flex-column">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h2 mb-0 text-gray-800">VMware 변경 이력</h1>
+    </div>
+    <hr width="100%" class="divider"/>
+
+    <!-- 뒤로 가기 -->
+    <div class="mb-3">
+        <a href="{{ url_for('vmware.index') }}" class="btn btn-secondary">← 목록으로</a>
+        <a href="{{ url_for('vmware.hosts') }}" class="btn btn-info">Host 관리</a>
+        <a href="{{ url_for('vmware.exceptions') }}" class="btn btn-warning">예외 관리</a>
+    </div>
+
+    <!-- 필터 -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form action="{{ url_for('vmware.changes') }}" method="GET" class="form-inline">
+                <div class="form-group mr-3">
+                    <label for="review_status" class="mr-2">검수 상태:</label>
+                    <select name="review_status" id="review_status" class="form-control">
+                        <option value="">전체</option>
+                        <option value="확인필요" {% if review_status == '확인필요' %}selected{% endif %}>확인필요</option>
+                        <option value="반영됨" {% if review_status == '반영됨' %}selected{% endif %}>반영됨</option>
+                        <option value="예외" {% if review_status == '예외' %}selected{% endif %}>예외</option>
+                    </select>
+                </div>
+
+                <div class="form-group mr-3">
+                    <label for="change_type" class="mr-2">변경 유형:</label>
+                    <select name="change_type" id="change_type" class="form-control">
+                        <option value="">전체</option>
+                        <option value="new" {% if change_type == 'new' %}selected{% endif %}>신규</option>
+                        <option value="modified" {% if change_type == 'modified' %}selected{% endif %}>수정</option>
+                        <option value="deleted" {% if change_type == 'deleted' %}selected{% endif %}>삭제</option>
+                    </select>
+                </div>
+
+                <div class="form-group mr-3">
+                    <label for="cluster_host" class="mr-2">클러스터:</label>
+                    <select name="cluster_host" id="cluster_host" class="form-control">
+                        <option value="">전체</option>
+                        {% for cluster in clusters %}
+                        <option value="{{ cluster.cluster_host }}" {% if cluster_host == cluster.cluster_host %}selected{% endif %}>{{ cluster.cluster_host }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <button type="submit" class="btn btn-primary">필터 적용</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 변경 이력 목록 -->
+    <form action="{{ url_for('vmware.review_changes') }}" method="POST">
+        <div class="mb-3">
+            <button type="submit" name="action" value="apply" class="btn btn-primary">확인 완료</button>
+            <button type="submit" name="action" value="exception" class="btn btn-warning">예외 처리</button>
+        </div>
+
+        <div class="table-responsive mb-4 mt-3">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select_all"></th>
+                        <th>Host</th>
+                        <th>VM명</th>
+                        <th>호스트명</th>
+                        <th>IP</th>
+                        <th>서버명</th>
+                        <th>변경 유형</th>
+                        <th>전원</th>
+                        <th>변경 내용</th>
+                        <th>검수 상태</th>
+                        <th>변경 일시</th>
+                        <th>맵핑 상태</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for change in changes %}
+                    <tr>
+                        <td>
+                            {% if change.review_status == '확인필요' %}
+                            <input type="checkbox" name="selected_changes[]" value="{{ change.change_id }}">
+                            {% endif %}
+                        </td>
+                        <td>{{ change.parent_host or '-' }}</td>
+                        <td>{{ change.vm_name }}</td>
+                        <td>{{ change.hostname }}</td>
+                        <td>{{ change.ip }}</td>
+                        <td>{{ change.servername }}</td>
+                        <td>
+                            {% if change.change_type == 'new' %}
+                                <span class="badge badge-success">신규</span>
+                            {% elif change.change_type == 'modified' %}
+                                <span class="badge badge-warning">수정</span>
+                            {% elif change.change_type == 'deleted' %}
+                                <span class="badge badge-danger">삭제</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if change.powerstate == 'poweredOn' %}
+                                <span class="badge badge-success">ON</span>
+                            {% else %}
+                                <span class="badge badge-danger">OFF</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if change.changes_parsed %}
+                                <small>
+                                {% for key, value in change.changes_parsed.items() %}
+                                    {% if key != 'last_updated' %}
+                                    <strong>{{ key }}:</strong> {{ value }}<br>
+                                    {% endif %}
+                                {% endfor %}
+                                </small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if change.review_status == '확인필요' %}
+                                <span class="badge badge-warning">확인필요</span>
+                            {% elif change.review_status == '반영됨' %}
+                                <span class="badge badge-success">반영됨</span>
+                            {% elif change.review_status == '예외' %}
+                                <span class="badge badge-secondary">예외</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ change.created_at.strftime('%Y-%m-%d %H:%M') if change.created_at else '' }}</td>
+                        <td>
+                            {% if change.pnum %}
+                                <a href="{{ url_for('asset.edit_asset', pnum=change.pnum) }}" class="badge badge-primary">맵핑됨</a>
+                            {% else %}
+                                <span class="badge badge-warning">미맵핑</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </form>
+</div>
+
+<script>
+$(document).ready(function() {
+    // 전체 선택
+    $('#select_all').on('change', function() {
+        $('input[name="selected_changes[]"]').prop('checked', this.checked);
+    });
+});
+</script>
+
+{% endblock %}

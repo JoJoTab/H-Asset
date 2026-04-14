@@ -33,6 +33,16 @@ CREATE TABLE `backup_schedule_asset_link` (
   CONSTRAINT `backup_schedule_asset_link_ibfk_1` FOREIGN KEY (`schedule_id`) REFERENCES `backup_schedule` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `backup_schedule_asset_link`
+--
+
+LOCK TABLES `backup_schedule_asset_link` WRITE;
+/*!40000 ALTER TABLE `backup_schedule_asset_link` DISABLE KEYS */;
+INSERT INTO `backup_schedule_asset_link` VALUES (9,1086,2904,'2025-10-13 10:30:10',NULL),(10,1091,2904,'2025-10-14 04:20:55',NULL);
+/*!40000 ALTER TABLE `backup_schedule_asset_link` ENABLE KEYS */;
+UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -43,4 +53,4 @@ CREATE TABLE `backup_schedule_asset_link` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-15 18:20:24
+-- Dump completed on 2026-03-07 15:34:45

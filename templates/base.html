@@ -254,17 +254,21 @@
                         <i class="fas fa-server"></i>
                         <span class="menu-text">상면도</span>
                     </a>
-                    <ul class="collapse list-unstyled tree-submenu" id="rackSubmenu">
+                    <ul class="collapse list-unstyled c" id="rackSubmenu">
                         <li>
                             <a href="{{ url_for('rack.racklayout') }}">
-                                <i class="fas fa-th fa-sm"></i>
-                                <span class="menu-text">상면도</span>
+                                <div class="pl-4">
+                                    <i class="fas fa-th fa-sm"></i>
+                                    <span class="menu-text">상면도</span>
+                                </div>
                             </a>
                         </li>
                         <li>
                             <a href="{{ url_for('rack.rackview') }}">
-                                <i class="fas fa-list fa-sm"></i>
-                                <span class="menu-text">실장도</span>
+                                <div class="pl-4">
+                                    <i class="fas fa-list fa-sm"></i>
+                                    <span class="menu-text">실장도</span>
+                                </div>
                             </a>
                         </li>
                     </ul>
@@ -280,7 +284,7 @@
                         <i class="fas fa-database"></i>
                         <span class="menu-text">데이터베이스 관리</span>
                     </a>
-                    <ul class="collapse list-unstyled tree-submenu" id="databaseSubmenu">
+                    <ul class="collapse list-unstyled c" id="databaseSubmenu">
                         <li>
                             <a href="{{ url_for('database.database_index') }}">
                                 <div class="pl-4">
@@ -304,17 +308,21 @@
                         <i class="fas fa-history"></i>
                         <span class="menu-text">백업 관리</span>
                     </a>
-                    <ul class="collapse list-unstyled tree-submenu" id="backupSubmenu">
+                    <ul class="collapse list-unstyled c" id="backupSubmenu">
                         <li>
                             <a href="{{ url_for('backup.index') }}">
-                                <i class="fas fa-th fa-sm"></i>
-                                <span class="menu-text">이력 관리</span>
+                                <div class="pl-4">
+                                    <i class="fas fa-th fa-sm"></i>
+                                    <span class="menu-text">이력 관리</span>
+                                </div>
                             </a>
                         </li>
                         <li>
                             <a href="{{ url_for('backup.schedule') }}">
-                                <i class="fas fa-list fa-sm"></i>
-                                <span class="menu-text">스케줄 관리</span>
+                                <div class="pl-4">
+                                    <i class="fas fa-list fa-sm"></i>
+                                    <span class="menu-text">스케줄 관리</span>
+                                </div>
                             </a>
                         </li>
                     </ul>
@@ -331,6 +339,12 @@
                         <span class="menu-text">파일 관리</span>
                     </a>
                 </li>
+                <li>
+                    <a href="{{ url_for('firewall.index') }}">
+                        <i class="fas fa-shield-alt"></i>
+                        <span class="menu-text">방화벽 관리</span>
+                    </a>
+                </li>
             </ul>
         </nav>
 
@@ -339,13 +353,24 @@
             <!-- ���래시 메시지 표시 -->
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
-                    <div class="flash-messages">
+                    <div class="flash-messages" id="flashMessages">
                         {% for category, message in messages %}
-                            <div class="alert alert-{{ category }}">
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                <i class="fas {% if category == 'success' %}fa-check-circle{% elif category == 'danger' %}fa-exclamation-circle{% else %}fa-info-circle{% endif %} mr-2"></i>
                                 {{ message }}
+                                <button type="button" class="close" data-dismiss="alert" aria-label="닫기">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
                             </div>
                         {% endfor %}
                     </div>
+                    <script>
+                        // 4초 후 flash 알람 자동 소멸
+                        setTimeout(function () {
+                            var el = document.getElementById('flashMessages');
+                            if (el) { $(el).find('.alert').alert('close'); }
+                        }, 4000);
+                    </script>
                 {% endif %}
             {% endwith %}
 

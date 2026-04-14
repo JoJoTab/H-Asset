@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>VMware Host 관리</h2>
+<hr width="100%" class="divider"/>
+
+<!-- 뒤로 가기 -->
+<div class="mb-3">
+    <a href="{{ url_for('vmware.index') }}" class="btn btn-secondary">← 목록으로</a>
+    <a href="{{ url_for('vmware.changes') }}" class="btn btn-info">변경 이력</a>
+</div>
+
+<!-- Host 목록 -->
+<div class="table-responsive">
+    <table id="host_table" class="table table-striped table-hover">
+        <thead>
+            <tr>
+                <th>클러스터</th>
+                <th>Host 이름</th>
+                <th>맵핑된 자산</th>
+                <th>자산 IP</th>
+                <th>VM 개수</th>
+                <th>마지막 확인</th>
+                <th>작업</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for host in hosts %}
+            <tr>
+                <td>{{ host.cluster_host }}</td>
+                <td>{{ host.host_name }}</td>
+                <td>
+                    {% if host.pnum %}
+                        <a href="{{ url_for('asset.edit_asset', pnum=host.pnum) }}">{{ host.host_servername }}</a>
+                    {% else %}
+                        <span class="text-muted">미맵핑</span>
+                    {% endif %}
+                </td>
+                <td>{{ host.host_ip or '-' }}</td>
+                <td>{{ host.vm_count }}</td>
+                <td>{{ host.last_seen.strftime('%Y-%m-%d %H:%M') if host.last_seen else '' }}</td>
+                <td>
+                    <a href="{{ url_for('vmware.map_host', host_id=host.host_id) }}" class="btn btn-sm btn-outline-primary">
+                        {% if host.pnum %}맵핑 변경{% else %}맵핑하기{% endif %}
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+$(document).ready(function() {
+    $('#host_table').DataTable({
+        pageLength: 25,
+        language: {
+            url: "{{ url_for('static', filename='js/korean.json') }}"
+        }
+    });
+});
+</script>
+
+{% endblock %}

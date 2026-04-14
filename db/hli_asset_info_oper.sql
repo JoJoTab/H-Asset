@@ -28,6 +28,16 @@ CREATE TABLE `info_oper` (
   PRIMARY KEY (`oper`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `info_oper`
+--
+
+LOCK TABLES `info_oper` WRITE;
+/*!40000 ALTER TABLE `info_oper` DISABLE KEYS */;
+INSERT INTO `info_oper` VALUES (0,'운영'),(1,'QA'),(2,'개발'),(3,'테스트'),(4,'DR'),(5,'프로젝트');
+/*!40000 ALTER TABLE `info_oper` ENABLE KEYS */;
+UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -38,4 +48,4 @@ CREATE TABLE `info_oper` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-15 18:20:25
+-- Dump completed on 2026-03-07 15:34:45

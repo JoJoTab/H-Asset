@@ -194,7 +194,7 @@
                         <ul class="list-group list-group-flush">
                             <li class="list-group-item d-flex justify-content-between align-items-center">
                             <strong>QueryOne 상태</strong>
-                                {% if use_flag=='ENABLE' %}
+                                {% if queryone_use_flag=='ENABLE' %}
                                 <span class="badge text-white bg-success">Enable</span>
                                 {% else %}
                                 <span class="badge text-white bg-danger">Disable</span>
@@ -202,7 +202,12 @@
 
                             </li>
                             <li class="list-group-item d-flex justify-content-between align-items-center">
-                            <strong>DBSafer 상태</strong> <span class="badge text-white bg-success">Enable</span>
+                            <strong>DBSafer 상태</strong>
+                                {% if dbsafer_use_flag=='Run' %}
+                                <span class="badge text-white bg-success">Run</span>
+                                {% else %}
+                                <span class="badge text-white bg-danger">Stop</span>
+                                {% endif %}
                             </li>
                             <li class="list-group-item d-flex justify-content-between align-items-center">
                             <strong>DBSafer Port</strong>{{ database.get('dbsafer_port') }}

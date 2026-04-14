@@ -28,6 +28,16 @@ CREATE TABLE `info_os` (
   PRIMARY KEY (`os`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `info_os`
+--
+
+LOCK TABLES `info_os` WRITE;
+/*!40000 ALTER TABLE `info_os` DISABLE KEYS */;
+INSERT INTO `info_os` VALUES (0,'Linux'),(1,'Windows'),(2,'Unix'),(3,'Order');
+/*!40000 ALTER TABLE `info_os` ENABLE KEYS */;
+UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -38,4 +48,4 @@ CREATE TABLE `info_os` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-15 18:20:25
+-- Dump completed on 2026-03-07 15:34:45

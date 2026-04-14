@@ -81,6 +81,7 @@
                 </div>
             </div>
         </div>
+
         <!-- 소프트웨어 관리 탭 -->
         <div class="tab-pane fade" id="software-content" role="tabpanel" aria-labelledby="software-tab">
             <div class="card shadow mb-4 mt-3">
@@ -354,7 +355,8 @@ $(document).ready(function() {
         language: {
             url: '/static/js/korean.json'
         },
-        order: [[0, 'asc']]
+        order: [[0, 'asc']],
+        pageLength: 25,
     });
 
     // 소프트웨어 DataTable 초기화
@@ -363,6 +365,7 @@ $(document).ready(function() {
             url: '/static/js/korean.json'
         },
         order: [[0, 'asc']],
+        pageLength: 25,
         processing: true,
         serverSide: false,
         ajax: {

@@ -2,19 +2,23 @@
 
 {% block content %}
 <div class="container-fluid">
-    <h1 class="mb-4">파일 관리</h1>
-
+        <h1 class="mb-4">파일 관리</h1>
     <!-- 경로 표시 및 이동 -->
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb bg-light p-3 border">
-            <li class="breadcrumb-item"><a href="{{ url_for('file.fileindex', path=base_path) }}"><i class="fas fa-home"></i> 홈</a></li>
-            {% set current = base_path %}
-            {% for part in relative_path.split('/') %}
-                {% if part and part != '.' %}
-                    {% set current = current + '/' + part %}
-                    <li class="breadcrumb-item"><a href="{{ url_for('file.fileindex', path=current) }}">{{ part }}</a></li>
-                {% endif %}
-            {% endfor %}
+            <div class="col-md-6 text-left">
+                <li class="breadcrumb-item"><a href="{{ url_for('file.fileindex', path=base_path) }}"><i class="fas fa-home"></i> 홈</a></li>
+                {% set current = base_path %}
+                {% for part in relative_path.split('/') %}
+                    {% if part and part != '.' %}
+                        {% set current = current + '/' + part %}
+                        <li class="breadcrumb-item"><a href="{{ url_for('file.fileindex', path=current) }}">{{ part }}</a></li>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            <div class="col-md-6 text-right">
+                <button class="bt btn-info btn-sm" onclick="openUrlModal()">URL 모음</button>
+            </div>
         </ol>
     </nav>
 
@@ -23,7 +27,7 @@
         <div class="col-md-6">
             <div class="card">
                 <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0"><i class="fas fa-upload"></i> 파일 업로드</h5>
+                    <h5 class="mb-0"><i class="fas fa-upload"></i>파일 업로드</h5>
                 </div>
                 <div class="card-body">
                     <form method="POST" enctype="multipart/form-data">
@@ -239,6 +243,41 @@
     </div>
 </div>
 
+<!-- URL 모달 -->
+<div class="modal fade" id="urlModal" tabindex="-1">
+    <div class="modal-dialog modal-md">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="urlModalTitle">URL 모음</h5>
+            </div>
+            <div class="modal-body text-center p-2">
+                <table id="urlTable" class="table table-striped table-bordered">
+                    <thead>
+                        <tr><th>URL</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><a href="https://gate.hanwhalife.com">Gateone 접근통제</a></td></tr>
+                        <tr><td><a href="https://10.10.7.183">SolidStep CCE 내부망</a></td></tr>
+                        <tr><td><a href="https://210.216.157.184">SolidStep CCE 외부망</a></td></tr>
+                        <tr><td><a href="https://hsms.hanwhalife.com">Polestar SMS</a></td></tr>
+                        <tr><td><a href="https://hnms.hanwhalife.com">Polestar NMS</a></td></tr>
+                        <tr><td><a href="https://coreapm.hanwhalife.com">Jeniffer APM Core</a></td></tr>
+                        <tr><td><a href="http://10.10.26.125">HSRM</a></td></tr>
+                        <tr><td><a href="https://10.10.28.116">BeyondTrust</a></td></tr>
+                        <tr><td><a href="https://vcenter1.hanwhalife.com">vCenter1</a></td></tr>
+                        <tr><td><a href="https://vcenter2.hanwhalife.com">vCenter2</a></td></tr>
+                        <tr><td><a href="https://vcenter3.hanwhalife.com">vCenter3</a></td></tr>
+                        <tr><td><a href="https://ctz-m-vc.hanwhalife.com">Tanzu 운영</a></td></tr>
+                        <tr><td><a href="https://ctz-dr-vc.hanwhalife.com">Tanzu DR</a></td></tr>
+                        <tr><td><a href="https://hlipdbvc.hanwhalife.com">오픈소스DB 운영</a></td></tr>
+                        <tr><td><a href="https://hlirdbvc.hanwhalife.com">오픈소스DB DR</a></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     // 파일 선택 시 파일명 표시
     document.querySelector('.custom-file-input').addEventListener('change', function(e) {
@@ -274,6 +313,11 @@
             document.getElementById('viewToggle').click();
         }
     });
+
+    // URL 모음 모달
+    function openUrlModal() {
+        $('#urlModal').modal('show');
+    }
 </script>
 
 <style>

@@ -351,7 +351,7 @@ def get_storage_overview(cursor):
           FROM storage_info si
                    LEFT JOIN total_storage ts ON si.storage_code = ts.STORAGE
               AND ts.DATEIN = (SELECT MAX(DATEIN) FROM total_storage WHERE STORAGE = si.storage_code)
-          WHERE si.status IN ('사용', '유휴')
+          WHERE si.status IN ('사용', '유휴') AND (si.storage_name NOT LIKE '%보험코어%' AND si.storage_name NOT LIKE '%NAS%')
           GROUP BY si.id, si.storage_code, si.storage_name, si.status, si.location, si.memo
           ORDER BY si.storage_code DESC\
           """

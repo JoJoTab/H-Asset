@@ -28,6 +28,16 @@ CREATE TABLE `info_domain` (
   PRIMARY KEY (`domain`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `info_domain`
+--
+
+LOCK TABLES `info_domain` WRITE;
+/*!40000 ALTER TABLE `info_domain` DISABLE KEYS */;
+INSERT INTO `info_domain` VALUES (0,'서버'),(1,'스토리지'),(2,'스위치'),(3,'어플라이언스');
+/*!40000 ALTER TABLE `info_domain` ENABLE KEYS */;
+UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -38,4 +48,4 @@ CREATE TABLE `info_domain` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-15 18:20:24
+-- Dump completed on 2026-03-07 15:34:43

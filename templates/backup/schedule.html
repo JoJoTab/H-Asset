@@ -944,7 +944,7 @@ function loadLinkedAsset(scheduleId, mode) {
                 const asset = response.asset;
                 $(`#${mode}LinkedAssetPnum`).val(asset.pnum);
                 $(`#${mode}LinkedAssetDetails`).html(`
-                    <div><strong>서버명:</strong> <a href=/edit/${asset.pnum}>${asset.servername || '-'}</a></div>
+                    <div><strong>서버명:</strong><a href=/edit/${asset.pnum}> ${asset.servername || '-'}<a></div>
                     <div><strong>호스트명:</strong> ${asset.hostname || '-'}</div>
                     <div><strong>IP:</strong> ${asset.ip || '-'}</div>
                 `);

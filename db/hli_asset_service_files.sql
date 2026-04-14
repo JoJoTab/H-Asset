@@ -33,6 +33,15 @@ CREATE TABLE `service_files` (
   CONSTRAINT `service_files_ibfk_1` FOREIGN KEY (`service_idx`) REFERENCES `info_service` (`app_idx`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `service_files`
+--
+
+LOCK TABLES `service_files` WRITE;
+/*!40000 ALTER TABLE `service_files` DISABLE KEYS */;
+/*!40000 ALTER TABLE `service_files` ENABLE KEYS */;
+UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -43,4 +52,4 @@ CREATE TABLE `service_files` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-15 18:20:26
+-- Dump completed on 2026-03-07 15:34:45

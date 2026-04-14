@@ -1,14 +1,16 @@
 import os
 import time
 import pandas as pd
-# import schedule
+import schedule
 import threading
+import shutil
+import re
 from datetime import datetime
 from utils.db import execute_query, get_db_connection
 
 # 자동 등록 설정
 AUTO_REGISTER_FOLDER = 'autodata/vmware'
-CHECK_INTERVAL = 10  # 10분마다 확인
+CHECK_INTERVAL_MINUTES = 60  # 매시간 정각마다 확인
 
 
 def setup_auto_register():
@@ -17,14 +19,16 @@ def setup_auto_register():
     if not os.path.exists(AUTO_REGISTER_FOLDER):
         os.makedirs(AUTO_REGISTER_FOLDER, exist_ok=True)
 
-    # 스케줄러 설정
-    schedule.every(CHECK_INTERVAL).minutes.do(check_rvtools_files)
+    schedule.every().hour.at(":30").do(check_rvtools_files)
 
     # 백그라운드 스레드에서 스케줄러 실행
     thread = threading.Thread(target=run_scheduler, daemon=True)
     thread.start()
 
-    print(f"자동 등록 기능이 설정되었습니다. {AUTO_REGISTER_FOLDER} 폴더를 {CHECK_INTERVAL}분마다 확인합니다.")
+    print(f"자동 등록 기능이 설정되었습니다. {AUTO_REGISTER_FOLDER} 폴더를 매시간 정각마다 확인합니다.")
+
+    # 시작 시 한 번 실행
+    check_rvtools_files()
 
 
 def run_scheduler():
@@ -40,42 +44,60 @@ def check_rvtools_files():
 
     # 폴더 내 모든 파일 확인
     for filename in os.listdir(AUTO_REGISTER_FOLDER):
-        if filename.startswith('RVTools') and filename.endswith('.xlsx'):
+        if filename.startswith('VMList_') and filename.endswith('.xlsx'):
             file_path = os.path.join(AUTO_REGISTER_FOLDER, filename)
-            print(f"RVTools 파일 발견: {filename}")
+            print(f"VMware 파일 발견: {filename}")
 
             try:
-                # 파일 처리
-                process_rvtools_file(file_path)
+                # 파일명에서 클러스터 호스트 추출
+                cluster_host = extract_cluster_host(filename)
 
-                # 처리 후 파일 삭제
-                os.remove(file_path)
+                # 파일 처리
+                process_rvtools_file(file_path, cluster_host)
+
+                shutil.move(file_path, os.path.join(AUTO_REGISTER_FOLDER + '/VMList_old', filename))
+                #os.remove(file_path)
                 print(f"파일 처리 완료 및 삭제: {filename}")
             except Exception as e:
                 print(f"파일 처리 중 오류 발생: {str(e)}")
+                try:
+                    os.remove(file_path)
+                    print(f"오류 발생한 파일 삭제: {filename}")
+                except:
+                    pass
 
 
-def process_rvtools_file(file_path):
+def extract_cluster_host(filename):
+    """파일명에서 클러스터 호스트 추출"""
+    # VMList_{IP or Domain}_YYYY-MM-DD_HH-mm-ss.xlsx 형식
+    pattern = r'VMList_(.+?)_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.xlsx'
+    match = re.match(pattern, filename)
+    if match:
+        return match.group(1)
+    return None
+
+
+def process_rvtools_file(file_path, cluster_host):
     """RVTools 파일 처리"""
     try:
         # Excel 파일 로드
         df = pd.read_excel(file_path, sheet_name='vInfo')
 
-        # 필요한 열만 선택
         required_columns = [
-            'VM', 'Powerstate', 'Guest state', 'CPUs', 'Memory',
+            'VM', 'DNS Name', 'Powerstate', 'CPUs', 'Memory',
             'Primary IP Address', 'Annotation', 'Host',
-            'OS according to the configuration file'
+            'OS according to the configuration file', 'OS according to the VMware Tools',
+            'Creation date'
         ]
 
         # 필요한 열이 모두 있는지 확인
-        for col in required_columns:
-            if col not in df.columns:
-                raise ValueError(f"필수 열 '{col}'이 Excel 파일에 없습니다.")
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            print(f"경고: 다음 열이 Excel 파일에 없습니다: {', '.join(missing_columns)}")
 
         # 각 VM에 대해 처리
         for _, row in df.iterrows():
-            process_vm_data(row)
+            process_vm_data(row, cluster_host)
 
         return True
     except Exception as e:
@@ -83,156 +105,198 @@ def process_rvtools_file(file_path):
         raise
 
 
-def process_vm_data(row):
+def process_vm_data(row, cluster_host):
     """VM 데이터 처리"""
-    # 필요한 데이터 추출
-    hostname = row['VM']
-    powerstate = row['Powerstate']
-    guest_state = row['Guest state']
-    cpus = row['CPUs']
-    memory = row['Memory']  # MB 단위
-    ip_address = row['Primary IP Address']
-    servername = row['Annotation']
-    host = row['Host']
-    os_version = row['OS according to the configuration file']
-
-    # 빈 값 처리
-    if pd.isna(hostname) or pd.isna(ip_address):
-        print(f"호스트명 또는 IP 주소가 없는 VM 건너뜀: {hostname if not pd.isna(hostname) else 'Unknown'}")
+    vm_name = row.get('VM')
+    if pd.isna(vm_name):
+        print(f"VM 이름이 없는 행 건너뜀")
         return
 
-    # 사용 여부 확인 (Powerstate가 poweredOn이고 Guest state가 running인 경우만 사용)
-    is_active = (powerstate == 'poweredOn' and guest_state == 'running')
+    hostname = row.get('DNS Name') if pd.notna(row.get('DNS Name')) else vm_name
+
+    powerstate = row.get('Powerstate')
+    cpus = row.get('CPUs')
+    memory = row.get('Memory')  # MB 단위
+    ip_address = row.get('Primary IP Address')
+    servername = row.get('Annotation')
+    host = row.get('Host')
+
+    if host and not pd.isna(host):
+        update_or_create_host(cluster_host, host)
+
+    os_version = row.get('OS according to the VMware Tools')
+    if pd.isna(os_version):
+        os_version = row.get('OS according to the configuration file')
+
+    creation_date = row.get('Creation Date')
+    if pd.notna(creation_date):
+        if isinstance(creation_date, str):
+            try:
+                creation_date = datetime.strptime(creation_date, '%Y-%m-%d %H:%M:%S').date()
+            except:
+                try:
+                    creation_date = datetime.strptime(creation_date, '%Y-%m-%d').date()
+                except:
+                    creation_date = None
+        elif isinstance(creation_date, datetime):
+            creation_date = creation_date.date()
+    else:
+        creation_date = None
+
+    # 빈 값 처리
+    if pd.isna(ip_address):
+        print(f"IP 주소가 없는 VM None 처리: {vm_name}")
+        ip_address="None"
+
+    is_powered_on = (powerstate == 'poweredOn')
 
     # 메모리 GB로 변환 (MB에서)
     memory_gb = int(memory / 1024) if not pd.isna(memory) else None
 
-    # DB에서 해당 VM 검색 (IP 또는 호스트명으로)
     sql = """
-    SELECT * FROM total_asset 
-    WHERE ip = %s OR hostname = %s
+    SELECT * FROM vmware_assets 
+    WHERE vm_name = %s AND cluster_host = %s
     """
-    existing_assets = execute_query(sql, (ip_address, hostname))
+    existing_vms = execute_query(sql, (vm_name, cluster_host))
 
-    if existing_assets:
-        # 기존 자산이 있으면 업데이트
-        update_existing_asset(existing_assets[0], hostname, ip_address, servername,
-                              is_active, cpus, memory_gb, host, os_version)
+    if existing_vms:
+        # 기존 VM이 있으면 업데이트
+        update_existing_vm(existing_vms[0], vm_name, hostname, ip_address, servername,
+                           is_powered_on, cpus, memory_gb, host, os_version,
+                           creation_date, cluster_host, powerstate)
     else:
-        # 새 자산 추가
-        add_new_asset(hostname, ip_address, servername, is_active,
-                      cpus, memory_gb, host, os_version)
+        # if not is_powered_on:
+        #     print(f"poweredOff 상태의 VM은 신규 등록하지 않음: {vm_name} ({ip_address})")
+        #     return
+
+        # 새 VM 추가
+        add_new_vm(vm_name, hostname, ip_address, servername, is_powered_on,
+                   cpus, memory_gb, host, os_version, creation_date, cluster_host)
 
 
-def update_existing_asset(asset, hostname, ip_address, servername, is_active, cpus, memory_gb, host, os_version):
-    """기존 자산 업데이트"""
+def update_or_create_host(cluster_host, host_name):
+    """Host 정보 업데이트 또는 생성"""
+    now = datetime.now()
+
+    # Host가 존재하는지 확인
+    check_sql = """
+    SELECT host_id FROM vmware_hosts 
+    WHERE cluster_host = %s AND host_name = %s
+    """
+    existing = execute_query(check_sql, (cluster_host, host_name), fetch_all=False)
+
+    if existing:
+        # 마지막 확인 시간 업데이트
+        update_sql = """
+        UPDATE vmware_hosts 
+        SET last_seen = %s 
+        WHERE cluster_host = %s AND host_name = %s
+        """
+        execute_query(update_sql, (now, cluster_host, host_name), fetch_all=False)
+    else:
+        # 새 Host 생성
+        insert_sql = """
+        INSERT INTO vmware_hosts (cluster_host, host_name, last_seen, created_at)
+        VALUES (%s, %s, %s, %s)
+        """
+        execute_query(insert_sql, (cluster_host, host_name, now, now), fetch_all=False)
+        print(f"새 Host 추가: {host_name} (클러스터: {cluster_host})")
+
+
+def update_existing_vm(vm, vm_name, hostname, ip_address, servername, is_powered_on, cpus, memory_gb, host, os_version,
+                       creation_date, cluster_host, powerstate):
+    """기존 VM 업데이트"""
     # 변경 사항 확인
     changes = {}
+    change_type = 'modified'  # 기본값
 
-    # 호스트명 변경 확인
-    if asset['hostname'] != hostname:
-        changes['hostname'] = hostname
+    if vm['cluster_host'] != cluster_host:
+        changes['cluster_host'] = {'old': vm['cluster_host'], 'new': cluster_host}
 
-    # IP 주소 변경 확인
-    if asset['ip'] != ip_address:
-        changes['ip'] = ip_address
+    if vm['parent_host'] != host and not pd.isna(host):
+        changes['parent_host'] = {'old': vm['parent_host'], 'new': host}
 
-    # 서버명 변경 확인 (Annotation)
-    if asset['servername'] != servername and not pd.isna(servername):
-        changes['servername'] = servername
+    if vm['hostname'] != hostname:
+        changes['hostname'] = {'old': vm['hostname'], 'new': hostname}
 
-    # CPU 코어 변경 확인
-    if asset['cpucore'] != cpus and not pd.isna(cpus):
-        changes['cpucore'] = cpus
+    if vm['ip'] != ip_address:
+        changes['ip'] = {'old': vm['ip'], 'new': ip_address}
 
-    # 메모리 변경 확인
-    if asset['memory'] != memory_gb and not pd.isna(memory_gb):
-        changes['memory'] = memory_gb
+    if vm['cpu_cores'] != cpus and not pd.isna(cpus):
+        changes['cpu_cores'] = {'old': vm['cpu_cores'], 'new': cpus}
+
+    if vm['memory_gb'] != memory_gb and not pd.isna(memory_gb):
+        changes['memory_gb'] = {'old': vm['memory_gb'], 'new': memory_gb}
 
     # OS 버전 변경 확인
-    if asset['osver'] != os_version and not pd.isna(os_version):
-        changes['osver'] = os_version
+    # if vm['os_version'] != os_version and not pd.isna(os_version):
+    #     changes['os_version'] = {'old': vm['os_version'], 'new': os_version}
 
-    # 상위 자산 IP 변경 확인 (Host)
-    if not pd.isna(host):
-        # 상위 자산 IP로 자산 검색
-        sql_host = "SELECT pnum FROM total_asset WHERE ip = %s AND isvm = 0"
-        host_asset = execute_query(sql_host, (host,), fetch_all=False)
-
-        if host_asset and asset['vcenter'] != host_asset['pnum']:
-            changes['vcenter'] = host_asset['pnum']
-
-    # 사용 여부 변경 확인
-    isoper_value = 0 if is_active else 2  # 0: 사용, 2: 사용안함
-    if asset['isoper'] != isoper_value:
-        changes['isoper'] = isoper_value
+    if vm['powerstate'] != powerstate:
+        changes['powerstate'] = {'old': vm['powerstate'], 'new': powerstate}
+        if powerstate == 'poweredOff':
+            change_type = 'deleted'
+            changes['status'] = {'old': vm['status'], 'new': '폐기'}
+        elif powerstate == 'poweredOn' and vm['powerstate'] == 'poweredOff':
+            changes['status'] = {'old': vm['status'], 'new': '사용'}
 
     # 변경 사항이 있으면 업데이트
     if changes:
-        # isfix를 0으로 설정 (확인 완료 상태)
-        changes['isfix'] = 0
-        changes['dateupdate'] = datetime.now()
+        update_data = {
+            'hostname': hostname,
+            'ip': ip_address,
+            'cluster_host': cluster_host,
+            'last_updated': datetime.now()
+        }
+
+        if not pd.isna(cpus):
+            update_data['cpu_cores'] = cpus
+        if not pd.isna(memory_gb):
+            update_data['memory_gb'] = memory_gb
+        if not pd.isna(host):
+            update_data['parent_host'] = host
+        if not pd.isna(os_version):
+            update_data['os_version'] = os_version
+        if powerstate:
+            update_data['powerstate'] = powerstate
+            if powerstate == 'poweredOff':
+                update_data['status'] = '폐기'
+            elif powerstate == 'poweredOn':
+                update_data['status'] = '사용'
 
         # SQL 쿼리 생성
-        set_clause = ", ".join([f"{key} = %s" for key in changes.keys()])
-        values = list(changes.values())
-        values.append(asset['pnum'])  # WHERE 조건용
+        set_clause = ", ".join([f"{key} = %s" for key in update_data.keys()])
+        values = list(update_data.values())
+        values.append(vm['vm_id'])  # WHERE 조건용
 
-        sql = f"UPDATE total_asset SET {set_clause} WHERE pnum = %s"
+        sql = f"UPDATE vmware_assets SET {set_clause} WHERE vm_id = %s"
 
         # 쿼리 실행
         execute_query(sql, values, fetch_all=False)
-        print(
-            f"자산 업데이트 (pnum: {asset['pnum']}): {', '.join([f'{k}={v}' for k, v in changes.items() if k != 'dateupdate'])}")
+
+        if 'parent_host' in changes and vm['pnum']:
+            update_vcenter_from_host(vm['pnum'], host, cluster_host)
+
+        if not is_vm_exception(vm_name, ip_address):
+            save_change_history(vm['vm_id'], vm_name, cluster_host, hostname, ip_address, change_type, changes)
+
+        print(f"VM 업데이트 (vm_id: {vm['vm_id']}, vm_name: {vm_name}): {len(changes)}개 항목 변경")
 
 
-def add_new_asset(hostname, ip_address, servername, is_active, cpus, memory_gb, host, os_version):
-    """새 자산 추가"""
-    # 상위 자산 검색 (Host IP로)
-    vcenter = None
-    if not pd.isna(host):
-        sql_host = "SELECT pnum FROM total_asset WHERE ip = %s AND isvm = 0"
-        host_asset = execute_query(sql_host, (host,), fetch_all=False)
-        if host_asset:
-            vcenter = host_asset['pnum']
-
-    # 사용 여부 설정
-    isoper = 0 if is_active else 2  # 0: 사용, 2: 사용안함
-
-    # OS 코드 가져오기
-    os_code = None
-    if not pd.isna(os_version):
-        # OS 이름 추출 (예: "Microsoft Windows Server 2019" -> "Windows")
-        os_name = None
-        if "windows" in os_version.lower():
-            os_name = "Windows"
-        elif "linux" in os_version.lower():
-            os_name = "Linux"
-        elif "centos" in os_version.lower():
-            os_name = "Linux"
-        elif "ubuntu" in os_version.lower():
-            os_name = "Linux"
-        elif "red hat" in os_version.lower() or "redhat" in os_version.lower():
-            os_name = "Linux"
-        elif "aix" in os_version.lower():
-            os_name = "AIX"
-        elif "hp-ux" in os_version.lower():
-            os_name = "HP-UX"
-
-        if os_name:
-            sql_os = "SELECT os FROM info_os WHERE state = %s"
-            os_result = execute_query(sql_os, (os_name,), fetch_all=False)
-            if os_result:
-                os_code = os_result['os']
-
+def add_new_vm(vm_name, hostname, ip_address, servername, is_powered_on, cpus, memory_gb, host, os_version,
+               creation_date, cluster_host):
+    """새 VM 추가"""
     # 현재 시간
     now = datetime.now()
 
+    is_exception = is_vm_exception(vm_name, ip_address)
+
     # SQL 쿼리
     sql = """
-    INSERT INTO total_asset (
-        servername, ip, hostname, isvm, vcenter, datein, isoper, os, osver, 
-        cpucore, memory, domain, isfix, dateinsert, dateupdate
+    INSERT INTO vmware_assets (
+        vm_name, cluster_host, hostname, ip, servername, cpu_cores, memory_gb, 
+        parent_host, os_version, install_date, powerstate, status, 
+        pnum, last_updated, created_at
     ) VALUES (
         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
     )
@@ -240,26 +304,100 @@ def add_new_asset(hostname, ip_address, servername, is_active, cpus, memory_gb, 
 
     # 값 설정
     values = (
-        servername if not pd.isna(servername) else hostname,  # servername
-        ip_address,  # ip
-        hostname,  # hostname
-        1,  # isvm (VM이므로 1)
-        vcenter,  # vcenter
-        now.date(),  # datein
-        isoper,  # isoper
-        os_code if os_code else 0,  # os
-        os_version if not pd.isna(os_version) else None,  # osver
-        cpus if not pd.isna(cpus) else None,  # cpucore
-        memory_gb if not pd.isna(memory_gb) else None,  # memory
-        0,  # domain (서버로 설정)
-        0,  # isfix (확인 완료 상태로 설정)
-        now,  # dateinsert
-        now  # dateupdate
+        vm_name,  # Added vm_name as first value
+        cluster_host,
+        hostname,
+        ip_address,
+        servername if not pd.isna(servername) else hostname,
+        cpus if not pd.isna(cpus) else None,
+        memory_gb if not pd.isna(memory_gb) else None,
+        host if not pd.isna(host) else None,
+        os_version if not pd.isna(os_version) else None,
+        creation_date,
+        'poweredOn' if is_powered_on else 'poweredOff',
+        '사용' if is_powered_on else '폐기',
+        None,  # pnum - 아직 맵핑되지 않음
+        now,
+        now
     )
 
     # 쿼리 실행
+    result = execute_query(sql, values, fetch_all=False)
+
+    # 새로 추가된 VM의 ID 가져오기
+    vm_id_sql = """SELECT vm_id FROM vmware_assets WHERE vm_name = %s AND cluster_host = %s"""
+    vm_id_result = execute_query(vm_id_sql, (vm_name, cluster_host), fetch_all=False)
+    vm_id = vm_id_result['vm_id'] if vm_id_result else None
+    print(vm_id, is_exception)
+    if vm_id and not is_exception:
+        save_change_history(vm_id, vm_name, cluster_host, hostname, ip_address, 'new', {
+            'servername': servername,
+            'cpu_cores': cpus,
+            'memory_gb': memory_gb,
+            'os_version': os_version,
+            'parent_host': host
+        })
+
+    print(f"새 VM 추가: {vm_name} ({hostname}, {ip_address})")
+
+
+def is_vm_exception(vm_name, ip_address):
+    """VM이 예외 목록에 있는지 확인"""
+    sql = """
+    SELECT exception_id FROM vmware_exceptions 
+    WHERE vm_name = %s AND ip = %s
+    """
+    result = execute_query(sql, (vm_name, ip_address), fetch_all=False)
+    return result is not None
+
+
+def save_change_history(vm_id, vm_name, cluster_host, hostname, ip_address, change_type, changes):
+    """변경 이력 저장"""
+    sql = """
+    INSERT INTO vmware_changes (
+        vm_id, vm_name, cluster_host, hostname, ip, change_type, changes, 
+        review_status, created_at
+    ) VALUES (
+        %s, %s, %s, %s, %s, %s, %s, %s, %s
+    )
+    """
+
+    # changes를 JSON 문자열로 변환
+    import json
+    changes_json = json.dumps(changes, default=str, ensure_ascii=False)
+
+    values = (
+        vm_id,
+        vm_name,  # Added vm_name
+        cluster_host,
+        hostname,
+        ip_address,
+        change_type,  # 'new', 'modified', 'deleted'
+        changes_json,
+        '확인필요',  # 기본 상태
+        datetime.now()
+    )
+
     execute_query(sql, values, fetch_all=False)
-    print(f"새 자산 추가: {hostname} ({ip_address})")
+
+
+def auto_map_assets():
+    """자동 자산 맵핑 - Hostname과 IP가 모두 같은 자산 자동 연결"""
+    sql = """
+    UPDATE vmware_assets va
+    JOIN total_asset ta ON (va.hostname = ta.hostname AND va.ip = ta.ip)
+    SET va.pnum = ta.pnum
+    WHERE va.pnum IS NULL
+    """
+
+    result = execute_query(sql, fetch_all=False)
+
+    print("자동 자산 맵핑 완료")
+
+
+def update_vcenter_from_host(vm_pnum, host_name, cluster_host):
+    """Host의 pnum을 사용하여 VM 자산의 vcenter 업데이트"""
+    pass
 
 
 def handle_auto_registered_assets(action, selected_assets):
@@ -267,46 +405,16 @@ def handle_auto_registered_assets(action, selected_assets):
     if not selected_assets:
         return False, "선택된 자산이 없습니다."
 
-    if action == "apply":
-        # 반영 처리 (isfix를 0으로 변경)
-        for pnum in selected_assets:
-            # 현재 자산 정보 가져오기
-            sql_get = "SELECT ip, hostname FROM total_asset WHERE pnum = %s"
-            asset = execute_query(sql_get, (pnum,), fetch_all=False)
-
-            if not asset:
-                continue
-
-            # 동일한 IP와 호스트명을 가진 다른 자산이 있는지 확인
-            sql_check = """
-            SELECT pnum FROM total_asset 
-            WHERE (ip = %s OR hostname = %s) 
-            AND pnum != %s AND isfix != 2
+    if action == "exception":
+        # 예외 처리
+        for vm_id in selected_assets:
+            update_change_sql = """
+            UPDATE vmware_changes 
+            SET review_status = '예외', reviewed_at = %s
+            WHERE vm_id = %s AND review_status = '확인필요'
             """
-            duplicates = execute_query(sql_check, (asset['ip'], asset['hostname'], pnum))
+            execute_query(update_change_sql, (datetime.now(), vm_id), fetch_all=False)
 
-            if duplicates:
-                # 중복 자산이 있으면 해�� 자산을 사용안함, 폐기 상태로 변경
-                for dup in duplicates:
-                    sql_update_dup = """
-                    UPDATE total_asset 
-                    SET isoper = 2, dateout = %s, dateupdate = %s 
-                    WHERE pnum = %s
-                    """
-                    execute_query(sql_update_dup, (datetime.now().date(), datetime.now(), dup['pnum']), fetch_all=False)
-
-            # 현재 자산의 isfix를 0으로 변경
-            sql_update = "UPDATE total_asset SET isfix = 0, dateupdate = %s WHERE pnum = %s"
-            execute_query(sql_update, (datetime.now(), pnum), fetch_all=False)
-
-        return True, f"{len(selected_assets)}개 자산이 반영되었습니다."
-
-    elif action == "delete":
-        # 삭제 처리
-        for pnum in selected_assets:
-            sql_delete = "DELETE FROM total_asset WHERE pnum = %s AND isfix = 2"
-            execute_query(sql_delete, (pnum,), fetch_all=False)
-
-        return True, f"{len(selected_assets)}개 자산이 삭제되었습니다."
+        return True, f"{len(selected_assets)}개 VM이 예외 처리되었습니다."
 
     return False, "잘못된 작업입니다."

@@ -3,7 +3,17 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import plotly.express as px
-from utils.db import execute_query, execute_many, get_db_connection
+from utils.db import (
+    execute_query, execute_many, get_db_connection,
+    get_asset_info_list, get_asset_info_by_pnum,
+    insert_asset_info, update_asset_info, delete_asset_info,
+    bulk_insert_asset_info,
+    get_ips_by_asset, replace_asset_ips, parse_ip_input,
+    get_links_by_asset, replace_asset_links,
+    get_relations_by_asset, replace_asset_relations,
+    search_asset_info as db_search_assets,
+    ASSET_OPTIONS,
+)
 from utils.cache import cache, invalidate_cache_pattern
 import os
 from werkzeug.utils import secure_filename
@@ -177,7 +187,7 @@ def generate_asset_graph():
                 LEFT JOIN hli_asset.info_power io_power ON ta.power = io_power.power
                 LEFT JOIN hli_asset.info_os io_os ON ta.os = io_os.os
                 LEFT JOIN hli_asset.info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
-                WHERE ta.isfix = 0 AND io_isoper.state = '사용'
+                WHERE ta.isfix = 0
                 """
 
     # 데이터 가져오기
@@ -217,7 +227,8 @@ def generate_asset_graph():
 
         # 해당 월 말 기준 유효 자산 (설치되었고 아직 폐기되지 않은 자산)
         valid_assets = installed_before[installed_before['dateout'].isna() |
-                                        (installed_before['dateout'] > month_end)]
+                                        (installed_before['dateout'] > month_end) |
+                                        (installed_before['isoper_state'] == '사용')]
 
         # 도메인별 자산 수 계산
         domain_counts = valid_assets['domain_state'].value_counts()
@@ -329,16 +340,12 @@ def generate_asset_graph():
 
 @asset_bp.route('/index_detail', methods=['GET', 'POST'])
 def index_detail():
-    """자산 상세 검색 페이지"""
-    # 검색 옵션 및 열 선택 유지를 위한 처리
+    """자산 상세 검색 페이지 (asset_info 스키마)"""
     if request.method == 'POST':
-        # POST 요청에서 선택된 열 가져오기
         selected_columns = request.form.getlist('columns')
-        # 검색 옵션을 세션에 저장
         session['search_options'] = {k: v for k, v in request.form.items() if k != 'columns'}
         session['selected_columns'] = selected_columns
     else:
-        # GET 요청에서는 URL 파라미터 또는 세션에서 선택된 열 가져오기
         url_columns = request.args.getlist('columns')
         if url_columns:
             selected_columns = url_columns
@@ -346,302 +353,124 @@ def index_detail():
         else:
             selected_columns = session.get('selected_columns', [])
 
-    # 기본 선택 열 설정 (아무것도 선택되지 않았을 경우)
     if not selected_columns:
-        selected_columns = ['domain', 'group', 'servername', 'ip', 'hostname', 'os', 'osver']
+        selected_columns = ['grp', 'servername', 'ip', 'hostname', 'os', 'status']
 
-    # 항상 포함되어야 하는 필수 열 (pnum은 자세히 링크에 필요)
-    required_columns = ['pnum']
+    # pnum은 항상 조회 (더블클릭 링크용)
+    if 'pnum' not in selected_columns:
+        selected_columns = ['pnum'] + selected_columns
 
-    # 열 매핑 정의 (DB 컬럼명 -> 화면 표시명)
     column_mapping = {
-        'domain': '도메인',
-        'itamnum': 'ITAM자산번호',
-        'servername': '서버명',
-        'ip': 'IP 주소',
-        'hostname': '호스트 이름',
-        'center': '센터',
-        'loc1': '상면번호',
-        'loc2': '상단번호',
-        'group': '그룹',
-        'vcenter': '상위자산',
-        'datein': '설치일자',
-        'dateout': '폐기일자',
-        'eos': 'EOS 일자',
-        'eosl': 'EOSL 일자',
-        'charge': '담당자(정)',
-        'charge2': '담당자(부)',
-        'isoper': '사용여부',
-        'oper': '서비스구분',
-        'power': '전원이중화',
-        'pdu': 'PDU',
-        'os': 'OS',
-        'osver': 'OS버전',
-        'maker': '제조사',
-        'model': '모델명',
-        'serial': '시리얼넘버',
-        'charge3': '현업담당자',
-        'isfix': '정합성 확인 필요',
-        'dateupdate': '업데이트 일자'
+        'pnum':         '자산번호',
+        'hostname':     'Hostname',
+        'servername':   '서버명',
+        'grp':          '그룹',
+        'oper':         '운영구분',
+        'status':       '자산상태',
+        'center':       '센터',
+        'network_zone': '망',
+        'asset_type':   '물리/논리',
+        'purpose':      '용도',
+        'ip':           'IP 주소',
+        'loc1':         '상면번호',
+        'loc2':         '상단번호',
+        'usize':        'U사이즈',
+        'maker':        '제조사',
+        'model':        '모델명',
+        'serial':       '시리얼',
+        'os':           'OS',
+        'osver':        'OS버전',
+        'cpucore':      'CPU코어',
+        'cpusocket':    'CPU소켓',
+        'memory':       '메모리(GB)',
+        'datein':       '도입일자',
+        'dateout':      '폐기일자',
+        'hw_eos':       'HW EOS',
+        'hw_eosl':      'HW EOSL',
+        'importance':   '중요도',
+        'power':        '전원이중화',
+        'watt':         '소비전력(W)',
+        'ampere':       '사용전류(A)',
+        'charge':       '담당(정)',
+        'charge2':      '담당(부)',
+        'charge3':      '서비스담당',
+        'memo':         '메모',
     }
 
-    # 역매핑 생성 (화면 표시명 -> DB 컬럼명)
-    reverse_mapping = {v: k for k, v in column_mapping.items()}
-
-    # SQL 쿼리 초기화 - 선택된 열만 조회
-    select_columns = required_columns + selected_columns
-
-    # 중복 제거
-    select_columns = list(dict.fromkeys(select_columns))
-
-    # 기본 테이블 열
-    base_columns = [f"ta.{col}" for col in select_columns if
-                    col not in ['domain', 'isoper', 'oper', 'power', 'os', 'group']]
-
-    # JOIN 테이블 열 (상태 값)
-    join_columns = []
-    if 'domain' in select_columns:
-        join_columns.append("id.state AS domain_state")
-    if 'isoper' in select_columns:
-        join_columns.append("io_isoper.state AS isoper_state")
-    if 'oper' in select_columns:
-        join_columns.append("io_oper.state AS oper_state")
-    if 'power' in select_columns:
-        join_columns.append("io_power.state AS power_state")
-    if 'os' in select_columns:
-        join_columns.append("io_os.state AS os_state")
-    if 'group' in select_columns:
-        join_columns.append("ig.state AS group_state")
-
-    # 모든 열 합치기
-    all_columns = base_columns + join_columns
-
-    # SQL 쿼리 생성
-    sql = f"""
-        SELECT {', '.join(all_columns)}
-        FROM total_asset ta 
-    """
-
-    # JOIN 조건 추가
-    if 'domain' in select_columns:
-        sql += " JOIN info_domain id ON ta.domain = id.domain"
-    if 'isoper' in select_columns:
-        sql += " LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper"
-    if 'oper' in select_columns:
-        sql += " LEFT JOIN info_oper io_oper.oper"
-    if 'power' in select_columns:
-        sql += " LEFT JOIN info_power io_power ON ta.power = io_power.power"
-    if 'os' in select_columns:
-        sql += " LEFT JOIN info_os io_os ON ta.os = io_os.os"
-    if 'group' in select_columns:
-        sql += " LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain"
-
-    sql += " WHERE 1=1"
-    params = []
-
-    # 기본적으로 isfix=0인 자산만 검색
-    if 'isfix' not in request.form and 'isfix' not in request.args and 'isfix' not in session.get('search_options', {}):
-        sql += " AND ta.isfix = 0"
-
-    # 계층 구조 필터링
-    domain_filter = request.args.get('domain', type=int)
-    group_filter = request.args.get('group', type=int)
-
-    if domain_filter is not None:
-        sql += " AND ta.domain = %s"
-        params.append(domain_filter)
-
-    if group_filter is not None:
-        sql += " AND ta.`group` = %s"
-        params.append(group_filter)
-
-    # 검색 조건 처리
-    search_options = {}
-
     if request.method == 'POST':
-        # POST 요청에서 검색 조건 가져오기
         search_options = {k: v for k, v in request.form.items() if k != 'columns'}
     else:
-        # GET 요청에서는 세션에서 검색 조건 가져오기
         search_options = session.get('search_options', {})
 
-    # 검색 조건 적용
-    if search_options:
-        # 입력값 가져오기
-        itamnum = search_options.get('itamnum', None)
-        servername = search_options.get('servername', None)
-        ip = search_options.get('ip', None)
-        hostname = search_options.get('hostname', None)
-        center = search_options.get('center', None)
-        loc1 = search_options.get('loc1', None)
-        loc2 = search_options.get('loc2', None)
-        group = search_options.get('group', None)
-        vcenter = search_options.get('vcenter', None)
-        datein = search_options.get('datein', None)
-        dateout = search_options.get('dateout', None)
-        eos = search_options.get('eos', None)
-        eosl = search_options.get('eosl', None)
-        charge = search_options.get('charge', None)
-        charge2 = search_options.get('charge2', None)
-        isoper = search_options.get('isoper', None)
-        oper = search_options.get('oper', None)
-        power = search_options.get('power', None)
-        pdu = search_options.get('pdu', None)
-        os = search_options.get('os', None)
-        osver = search_options.get('osver', None)
-        maker = search_options.get('maker', None)
-        model = search_options.get('model', None)
-        serial = search_options.get('serial', None)
-        domain = search_options.get('domain', None)
-        charge3 = search_options.get('charge3', None)
-        isfix = search_options.get('isfix', None)
+    # ── SQL 빌드 ─────────────────────────────────────────────
+    sql = """
+        SELECT ai.*,
+               GROUP_CONCAT(aip.ip ORDER BY aip.id SEPARATOR ', ') AS ip
+        FROM asset_info ai
+        LEFT JOIN asset_ip aip ON ai.pnum = aip.asset_pnum
+        WHERE 1=1
+    """
+    params = []
 
-        # 조건 추가
-        if itamnum:
-            sql += " AND ta.itamnum LIKE %s"
-            params.append(f'%{itamnum}%')
-        if servername:
-            sql += " AND ta.servername LIKE %s"
-            params.append(f'%{servername}%')
-        if ip:
-            sql += " AND ta.ip LIKE %s"
-            params.append(f'%{ip}%')
-        if hostname:
-            sql += " AND ta.hostname LIKE %s"
-            params.append(f'%{hostname}%')
-        if center:
-            sql += " AND ta.center LIKE %s"
-            params.append(f'%{center}%')
-        if loc1:
-            sql += " AND ta.loc1 LIKE %s"
-            params.append(f'%{loc1}%')
-        if loc2:
-            try:
-                loc2_int = int(loc2)
-                sql += " AND ta.loc2 = %s"
-                params.append(loc2_int)
-            except (ValueError, TypeError):
-                pass
-        if group:
-            try:
-                group_int = int(group)
-                sql += " AND ta.`group` = %s"
-                params.append(group_int)
-            except (ValueError, TypeError):
-                pass
-        if vcenter:
-            try:
-                vcenter_int = int(vcenter)
-                sql += " AND ta.vcenter = %s"
-                params.append(vcenter_int)
-            except (ValueError, TypeError):
-                pass
-        if datein:
-            sql += " AND ta.datein = %s"
-            params.append(datein)
-        if dateout:
-            sql += " AND ta.dateout = %s"
-            params.append(dateout)
-        if eos:
-            sql += " AND ta.eos = %s"
-            params.append(eos)
-        if eosl:
-            sql += " AND ta.eosl = %s"
-            params.append(eosl)
-        if charge:
-            sql += " AND ta.charge LIKE %s"
-            params.append(f'%{charge}%')
-        if charge2:
-            sql += " AND ta.charge2 LIKE %s"
-            params.append(f'%{charge2}%')
-        if isoper:
-            try:
-                isoper_int = int(isoper)
-                sql += " AND ta.isoper = %s"
-                params.append(isoper_int)
-            except (ValueError, TypeError):
-                pass
-        if oper:
-            try:
-                oper_int = int(oper)
-                sql += " AND ta.oper = %s"
-                params.append(oper_int)
-            except (ValueError, TypeError):
-                pass
-        if power:
-            try:
-                power_int = int(power)
-                sql += " AND ta.power = %s"
-                params.append(power_int)
-            except (ValueError, TypeError):
-                pass
-        if pdu:
-            sql += " AND ta.pdu LIKE %s"
-            params.append(f'%{pdu}%')
-        if os:
-            sql += " AND ta.os = %s"
-            params.append(os)
-        if osver:
-            sql += " AND ta.osver LIKE %s"
-            params.append(f'%{osver}%')
-        if maker:
-            sql += " AND ta.maker LIKE %s"
-            params.append(f'%{maker}%')
-        if model:
-            sql += " AND ta.model LIKE %s"
-            params.append(f'%{model}%')
-        if serial:
-            sql += " AND ta.serial LIKE %s"
-            params.append(f'%{serial}%')
-        if domain:
-            try:
-                domain_int = int(domain)
-                sql += " AND ta.domain = %s"
-                params.append(domain_int)
-            except (ValueError, TypeError):
-                pass
-        if charge3:
-            sql += " AND ta.charge3 LIKE %s"
-            params.append(f'%{charge3}%')
-        if isfix:
-            try:
-                isfix_int = int(isfix)
-                sql += " AND ta.isfix = %s"
-                params.append(isfix_int)
-            except (ValueError, TypeError):
-                pass
+    def _like(field, val):
+        return f" AND ai.{field} LIKE %s", f"%{val}%"
 
-    # 정렬 추가
-    sql += " ORDER BY ta.dateupdate DESC"  # 성능을 위해 결과 제한
+    for field in ('servername', 'hostname', 'center', 'loc1', 'osver', 'maker', 'model', 'serial',
+                  'grp', 'oper', 'status', 'network_zone',
+                  'asset_type', 'importance', 'power', 'os', 'purpose'):
+        val = search_options.get(field, '').strip()
+        if val:
+            clause, p = _like(field, val)
+            sql += clause
+            params.append(p)
 
-    # 마지막 검색 쿼리와 파라미터를 세션에 저장 (내보내기용)
+    # 담당자(정)·(부)·서비스담당자 통합 OR 검색
+    charge_any = search_options.get('charge_any', '').strip()
+    if charge_any:
+        sql += " AND (ai.charge LIKE %s OR ai.charge2 LIKE %s OR ai.charge3 LIKE %s)"
+        pv = f"%{charge_any}%"
+        params.extend([pv, pv, pv])
+
+    # 날짜 기간(from~to) 검색
+    for field in ('datein', 'dateout', 'hw_eos', 'hw_eosl'):
+        from_val = search_options.get(f'{field}_from', '').strip()
+        to_val   = search_options.get(f'{field}_to',   '').strip()
+        if from_val:
+            sql += f" AND ai.{field} >= %s"
+            params.append(from_val)
+        if to_val:
+            sql += f" AND ai.{field} <= %s"
+            params.append(to_val)
+
+    loc2 = search_options.get('loc2', '').strip()
+    if loc2:
+        try:
+            sql += " AND ai.loc2 = %s"
+            params.append(int(loc2))
+        except ValueError:
+            pass
+
+    ip_search = search_options.get('ip', '').strip()
+    if ip_search:
+        sql += " AND ai.pnum IN (SELECT asset_pnum FROM asset_ip WHERE ip LIKE %s)"
+        params.append(f"%{ip_search}%")
+
+    sql += " GROUP BY ai.pnum ORDER BY ai.pnum DESC"
+
+    # 세션 저장 (검색결과 내보내기용)
     session['last_search_query'] = sql
     session['last_search_params'] = params
 
-    # 데이터 가져오기
     data = execute_query(sql, params)
-
-    # 계층 구조 가져오기
-    hierarchy = get_asset_hierarchy(domain=domain_filter, group=group_filter)
-
-    # 도메인 및 그룹 옵션 가져오기
-    domain_options = execute_query("SELECT * FROM info_domain")
-
-    group_options = []
-    if domain_filter is not None:
-        group_sql = "SELECT * FROM info_group WHERE domain = %s"
-        group_options = execute_query(group_sql, (domain_filter,))
+    hierarchy = get_asset_hierarchy()
 
     return render_template('index_detail.html',
                            data=data,
                            selected_columns=selected_columns,
                            column_mapping=column_mapping,
                            hierarchy=hierarchy,
-                           domain_options=domain_options,
-                           group_options=group_options,
-                           domain_filter=domain_filter,
-                           group_filter=group_filter,
-                           search_options=search_options)
+                           search_options=search_options,
+                           options=ASSET_OPTIONS)
 
 
 @asset_bp.route('/get_asset_details/<int:pnum>')
@@ -697,164 +526,60 @@ def get_groups():
 
 @asset_bp.route('/search_assets', methods=['GET'])
 def search_assets():
-    """자산 검색 API (AJAX 요청용)"""
-    search_term = request.args.get('term', '')
-    group = request.args.get('group', 0, type=int)  # 기본값은 물리 서버(0)
+    """자산 검색 API (AJAX autocomplete)"""
+    term       = request.args.get('term', '')
+    grp_filter = request.args.get('grp', None)
 
-    # 검색어가 없으면 빈 결과 반환
-    if not search_term:
+    if not term:
         return jsonify([])
 
-    # 그룹 필터링 조건 추가
-    sql = """
-        SELECT pnum, servername, hostname, ip
-        FROM total_asset
-        WHERE `group` = %s AND (servername LIKE %s OR hostname LIKE %s OR ip LIKE %s)
-        LIMIT 20
-    """
-
-    search_param = f'%{search_term}%'
-    results = execute_query(sql, (group, search_param, search_param, search_param))
-
-    return jsonify(results)
+    results = db_search_assets(term, grp_filter=grp_filter, limit=20)
+    return jsonify([
+        {
+            "pnum":       r["pnum"],
+            "label":      f"{r['servername'] or ''} ({r['hostname'] or ''}) [{r['ip'] or ''}]",
+            "servername": r["servername"],
+            "hostname":   r["hostname"],
+            "ip":         r["ip"],
+            "grp":        r["grp"],
+        }
+        for r in results
+    ])
 
 
 @asset_bp.route('/write')
 def write_asset():
-    """자산 추가 페이지"""
-    # 옵션 데이터 가져오기
-    isoper_options = execute_query("SELECT * FROM info_isoper")
-    oper_options = execute_query("SELECT * FROM info_oper")
-    power_options = execute_query("SELECT * FROM info_power")
-    os_options = execute_query("SELECT * FROM info_os")
-    domain_options = execute_query("SELECT * FROM info_domain")
-
-    # 계층 구조 가져오기
+    """자산 등록 페이지 (신규 — pnum 없음)"""
     hierarchy = get_asset_hierarchy()
-
-    return render_template('write.html',
-                           isoper_options=isoper_options,
-                           oper_options=oper_options,
-                           power_options=power_options,
-                           os_options=os_options,
-                           domain_options=domain_options,
+    return render_template('asset/form.html',
+                           mode='create',
+                           data=None,
+                           ips=[],
+                           links=[],
+                           relations=[],
+                           options=ASSET_OPTIONS,
                            hierarchy=hierarchy)
 
 
 @asset_bp.route('/add', methods=['POST'])
 def add_asset():
-    """자산 추가 처리"""
-    sql = """INSERT INTO total_asset (itamnum, servername, ip, hostname, center, loc1, loc2, `group`, vcenter, 
-            datein, dateout, eos, eosl, charge, charge2, isoper, oper, power, pdu, os, osver, maker, model, serial, domain, 
-            charge3, usize, cpucore, memory, isfix, dateupdate) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-            %s, %s, %s, %s, %s, %s)"""
+    """자산 등록 처리"""
+    data = _collect_form_data()
 
-    # 폼 데이터 가져오기
-    itamnum = request.form.get('itamnum')
-    servername = request.form.get('servername')
-    ip = request.form.get('ip')
-    hostname = request.form.get('hostname')
-    center = request.form.get('center')
-    loc1 = request.form.get('loc1')
-    loc2 = request.form.get('loc2', type=int)
-    group = request.form.get('group', type=int)
+    # asset_info 삽입
+    new_pnum = insert_asset_info(data)
 
-    # vcenter 값 처리 - group이 1(논리)인 경우에만 vcenter 값을 사용
-    vcenter = None
-    if group == 1:
-        vcenter = request.form.get('vcenter', type=int)
-        # vcenter 값이 없거나 0인 경우 None으로 설정
-        if not vcenter:
-            vcenter = None
+    # IP 저장
+    replace_asset_ips(new_pnum, parse_ip_input(request.form.get('ip_raw', '')))
 
-    datein = request.form.get('datein')
-    dateout = request.form.get('dateout')
-    eos = request.form.get('eos')
-    eosl = request.form.get('eosl')
-    charge = request.form.get('charge')
-    charge2 = request.form.get('charge2')
-    isoper_state = request.form.get('isoper')
-    oper_state = request.form.get('oper')
-    power_state = request.form.get('power')
-    pdu = request.form.get('pdu')
-    os_state = request.form.get('os')
-    osver = request.form.get('osver')
-    maker = request.form.get('maker')
-    model = request.form.get('model')
-    serial = request.form.get('serial')
-    domain_state = request.form.get('domain')
-    charge3 = request.form.get('charge3')
-    usize = request.form.get('usize', type=int, default=1)
-    cpucore = request.form.get('cpucore', type=int)
-    memory = request.form.get('memory', type=int)
-    isfix = 0  # 새로 추가된 자산은 기본적으로 확인 완료 상태로 설정
-    dateupdate = datetime.now()  # 현재 시간으로 업데이트 일자 설정
+    # 연계 정보 저장
+    replace_asset_links(new_pnum, _collect_links())
 
-    # 날짜 형식 검사 및 변환
-    try:
-        datein = datetime.strptime(datein, '%Y-%m-%d').date() if datein else None
-    except ValueError:
-        datein = None
+    # 관계 저장
+    replace_asset_relations(new_pnum, _collect_relations())
 
-    try:
-        dateout = datetime.strptime(dateout, '%Y-%m-%d').date() if dateout else None
-    except ValueError:
-        dateout = None
-
-    try:
-        eos = datetime.strptime(eos, '%Y-%m-%d').date() if eos else None
-    except ValueError:
-        eos = None
-
-    try:
-        eosl = datetime.strptime(eosl, '%Y-%m-%d').date() if eosl else None
-    except ValueError:
-        eosl = None
-
-    # 코드 값 조회
-    db = get_db_connection()
-    try:
-        with db.cursor() as cursor:
-            # isoper
-            cursor.execute("SELECT isoper FROM info_isoper WHERE state = %s", (isoper_state,))
-            isoper_value = cursor.fetchone()
-            isoper = isoper_value['isoper'] if isoper_value else 0
-
-            # oper
-            cursor.execute("SELECT oper FROM info_oper WHERE state = %s", (oper_state,))
-            oper_value = cursor.fetchone()
-            oper = oper_value['oper'] if oper_value else 0
-
-            # power
-            cursor.execute("SELECT power FROM info_power WHERE state = %s", (power_state,))
-            power_value = cursor.fetchone()
-            power = power_value['power'] if power_value else 0
-
-            # os
-            cursor.execute("SELECT os FROM info_os WHERE state = %s", (os_state,))
-            os_value = cursor.fetchone()
-            os_code = os_value['os'] if os_value else 0
-
-            # domain
-            cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (domain_state,))
-            domain_value = cursor.fetchone()
-            domain = domain_value['domain'] if domain_value else 0
-
-            # 데이터 삽입
-            cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
-                                 group, vcenter, datein, dateout, eos, eosl, charge, charge2,
-                                 isoper, oper, power, pdu, os_code, osver, maker, model, serial, domain, charge3,
-                                 usize, cpucore, memory, isfix, dateupdate))
-            db.commit()
-    finally:
-        db.close()
-
-    # 캐시 무효화
-    invalidate_cache_pattern('index_data')
-    invalidate_cache_pattern('asset_data')
-    invalidate_cache_pattern('asset_graph')
-
+    _invalidate_asset_cache()
+    flash('자산정보가 성공적으로 등록되었습니다.', 'success')
     return redirect(url_for('asset.index'))
 
 
@@ -862,413 +587,263 @@ def add_asset():
 def edit_asset(pnum):
     """자산 수정 페이지 및 처리"""
     if request.method == 'POST':
-        sql = """UPDATE total_asset SET itamnum = %s, servername = %s, ip = %s, 
-                      hostname = %s, center = %s, loc1 = %s, loc2 = %s, `group` = %s, vcenter = %s,
-                      datein = %s, dateout = %s, eos = %s, eosl = %s, charge = %s, charge2 = %s, 
-                      isoper = %s, oper = %s, power = %s, pdu = %s, os = %s, 
-                      osver = %s, maker = %s, model = %s, serial = %s, domain = %s, charge3 = %s,
-                      usize = %s, cpucore = %s, memory = %s, isfix = %s, dateupdate = %s
-                      WHERE pnum = %s"""
+        data = _collect_form_data()
+        update_asset_info(pnum, data)
 
-        # 폼 데이터 가져오기
-        itamnum = request.form.get('itamnum')
-        servername = request.form.get('servername')
-        ip = request.form.get('ip')
-        hostname = request.form.get('hostname')
-        center = request.form.get('center')
-        loc1 = request.form.get('loc1')
-        loc2 = request.form.get('loc2', type=int)
-        group = request.form.get('group', type=int)
+        replace_asset_ips(pnum, parse_ip_input(request.form.get('ip_raw', '')))
+        replace_asset_links(pnum, _collect_links())
+        replace_asset_relations(pnum, _collect_relations())
 
-        # vcenter 값 처리 - group이 1(논리)인 경우에만 vcenter 값을 사용
-        vcenter = None
-        if group == 1:
-            vcenter = request.form.get('vcenter', type=int)
-            # vcenter 값이 없거나 0인 경우 None으로 설정
-            if not vcenter:
-                vcenter = None
-
-        datein = request.form.get('datein')
-        dateout = request.form.get('dateout')
-        eos = request.form.get('eos')
-        eosl = request.form.get('eosl')
-        charge = request.form.get('charge')
-        charge2 = request.form.get('charge2')
-        isoper_state = request.form.get('isoper')
-        oper_state = request.form.get('oper')
-        power_state = request.form.get('power')
-        pdu = request.form.get('pdu')
-        os_state = request.form.get('os')
-        osver = request.form.get('osver')
-        maker = request.form.get('maker')
-        model = request.form.get('model')
-        serial = request.form.get('serial')
-        domain_state = request.form.get('domain')
-        charge3 = request.form.get('charge3')
-        usize = request.form.get('usize', type=int, default=1)
-        cpucore = request.form.get('cpucore', type=int)
-        memory = request.form.get('memory', type=int)
-        isfix = 0  # 수정된 자산은 기본적으로 확인 완료 상태로 설정
-        dateupdate = datetime.now()  # 현재 시간으로 업데이트 일자 설정
-
-        # 날짜 형식 검사 및 변환
-        try:
-            datein = datetime.strptime(datein, '%Y-%m-%d').date() if datein else None
-        except ValueError:
-            datein = None
-
-        try:
-            dateout = datetime.strptime(dateout, '%Y-%m-%d').date() if dateout else None
-        except ValueError:
-            dateout = None
-
-        try:
-            eos = datetime.strptime(eos, '%Y-%m-%d').date() if eos else None
-        except ValueError:
-            eos = None
-
-        try:
-            eosl = datetime.strptime(eosl, '%Y-%m-%d').date() if eosl else None
-        except ValueError:
-            eosl = None
-
-        # 코드 값 조회
-        db = get_db_connection()
-        try:
-            with db.cursor() as cursor:
-                # isoper
-                cursor.execute("SELECT isoper FROM info_isoper WHERE state = %s", (isoper_state,))
-                isoper_value = cursor.fetchone()
-                isoper = isoper_value['isoper'] if isoper_value else None
-
-                # oper
-                cursor.execute("SELECT oper FROM info_oper WHERE state = %s", (oper_state,))
-                oper_value = cursor.fetchone()
-                oper = oper_value['oper'] if oper_value else None
-
-                # power
-                cursor.execute("SELECT power FROM info_power WHERE state = %s", (power_state,))
-                power_value = cursor.fetchone()
-                power = power_value['power'] if power_value else None
-
-                # os
-                cursor.execute("SELECT os FROM info_os WHERE state = %s", (os_state,))
-                os_value = cursor.fetchone()
-                os_code = os_value['os'] if os_value else None
-
-                # domain
-                cursor.execute("SELECT domain FROM info_domain WHERE state = %s", (domain_state,))
-                domain_value = cursor.fetchone()
-                domain = domain_value['domain'] if domain_value else None
-
-                # 데이터 업데이트
-                cursor.execute(sql, (itamnum, servername, ip, hostname, center, loc1, loc2,
-                                     group, vcenter, datein, dateout, eos, eosl, charge, charge2,
-                                     isoper, oper, power, pdu, os_code, osver, maker, model, serial, domain, charge3,
-                                     usize, cpucore, memory, isfix, dateupdate, pnum))
-                db.commit()
-        finally:
-            db.close()
-
-        # 캐시 무효화
-        invalidate_cache_pattern('index_data')
-        invalidate_cache_pattern('asset_data')
-        invalidate_cache_pattern('asset_graph')
-
+        _invalidate_asset_cache()
+        flash('자산정보가 성공적으로 수정되었습니다.', 'success')
         return redirect(url_for('asset.index_detail'))
 
-    # GET 요청 시 데이터 가져오기
-    sql = """
-        SELECT ta.*, 
-               io_isoper.state AS isoper_state, 
-               io_oper.state AS oper_state,
-               io_os.state AS os_state,
-               io_domain.state AS domain_state,
-               io_power.state AS power_state,
-               ig.state AS group_state
-        FROM total_asset ta
-        LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
-        LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
-        LEFT JOIN info_os io_os ON ta.os = io_os.os
-        LEFT JOIN info_domain io_domain ON ta.domain = io_domain.domain
-        LEFT JOIN info_power io_power ON ta.power = io_power.power
-        LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
-        WHERE ta.pnum = %s
-    """
-    data = execute_query(sql, (pnum,), fetch_all=False)
+    # GET: 기존 데이터 조회
+    data      = get_asset_info_by_pnum(pnum)
+    ips       = get_ips_by_asset(pnum)
+    links     = get_links_by_asset(pnum)
+    relations = get_relations_by_asset(pnum)
 
-    # 상위 자산 정보 가져오기 (vcenter가 있는 경우)
-    parent_asset = None
-    if data and data.get('group') == 1 and data.get('vcenter'):
-        parent_sql = """
-            SELECT pnum, servername, hostname, ip
-            FROM total_asset
-            WHERE pnum = %s
-        """
-        parent_asset = execute_query(parent_sql, (data['vcenter'],), fetch_all=False)
-
-    # 하위 자산 정보 가져오기 (현재 자산의 pnum을 vcenter로 가지고 있는 자산들)
-    child_assets = []
-    child_sql = """
-        SELECT pnum, servername, hostname, ip
-        FROM total_asset
-        WHERE vcenter = %s AND `group` = 1
-        ORDER BY servername
-    """
-    child_assets = execute_query(child_sql, (pnum,))
-
-    # edit_asset 함수의 연계된 서비스 조회 부분 바로 아래에 추가
-    # 연계된 소프트웨어 정보 가져오기 (현재 자산에 연계된 소프트웨어들)
-    software_sql = """
+    # 연계 소프트웨어 (total_software 테이블 참조 — 기존 유지)
+    linked_software = execute_query("""
         SELECT s.sw_idx, s.sw_name, s.sw_version, st.type_name,
-               CASE s.sw_status 
-                   WHEN 1 THEN '사용' 
-                   ELSE '미사용' 
-               END as isoper_state
+               CASE s.sw_status WHEN 1 THEN '사용' ELSE '미사용' END AS isoper_state
         FROM info_software s
         LEFT JOIN info_software_type st ON s.sw_type = st.type_idx
         JOIN total_software ts ON s.sw_idx = ts.software_swidx
         WHERE ts.software_pnum = %s
         ORDER BY s.sw_name
-    """
-    linked_software = execute_query(software_sql, (pnum,))
+    """, (pnum,))
 
-    # 옵션 데이터 가져오기
-    isoper_options = execute_query("SELECT * FROM info_isoper")
-    oper_options = execute_query("SELECT * FROM info_oper")
-    os_options = execute_query("SELECT * FROM info_os")
-    domain_options = execute_query("SELECT * FROM info_domain")
-    power_options = execute_query("SELECT * FROM info_power")
+    # 연계 서비스 (total_service 테이블 참조 — 기존 유지)
+    linked_services = execute_query("""
+        SELECT sv.app_idx, sv.app_name, sv.app_servicecode
+        FROM total_service ts
+        JOIN info_service sv ON ts.service_idx = sv.app_idx
+        WHERE ts.service_pnum = %s
+        ORDER BY sv.app_name
+    """, (pnum,))
 
-    # 도메인에 따른 그룹 옵션 가져오기
-    group_options = []
-    if data and data.get('domain') is not None:
-        group_sql = "SELECT * FROM info_group WHERE domain = %s"
-        group_options = execute_query(group_sql, (data['domain'],))
+    hierarchy = get_asset_hierarchy(pnum=pnum)
 
-    # 계층 구조 가져오기
-    hierarchy = get_asset_hierarchy(pnum=pnum, domain=data.get('domain'), group=data.get('group'))
-
-    return render_template('edit.html',
+    return render_template('asset/form.html',
+                           mode='edit',
                            data=data,
-                           parent_asset=parent_asset,
-                           child_assets=child_assets,
-                           linked_software=linked_software,  # 추가
-                           isoper_options=isoper_options,
-                           oper_options=oper_options,
-                           os_options=os_options,
-                           domain_options=domain_options,
-                           power_options=power_options,
-                           group_options=group_options,
+                           ips=ips,
+                           links=links,
+                           relations=relations,
+                           linked_software=linked_software,
+                           linked_services=linked_services,
+                           options=ASSET_OPTIONS,
                            hierarchy=hierarchy)
 
 
 @asset_bp.route('/delete/<int:pnum>')
 def delete_asset(pnum):
-    """자산 삭제 처리"""
-    sql = "DELETE FROM total_asset WHERE pnum = %s"
-    execute_query(sql, (pnum,), fetch_all=False)
-
-    # 캐시 무효화
-    invalidate_cache_pattern('index_data')
-    invalidate_cache_pattern('asset_data')
-    invalidate_cache_pattern('asset_graph')
-
+    """자산 삭제 처리 (FK CASCADE 로 IP/연계/관계 자동 삭제)"""
+    delete_asset_info(pnum)
+    _invalidate_asset_cache()
+    flash('자산이 삭제되었습니다.', 'success')
     return redirect(url_for('asset.index'))
 
 
-@asset_bp.route('/export')
+@asset_bp.route('/export', methods=['GET', 'POST'])
 def export_asset():
-    """자산 데이터 내보내기"""
-    # 데이터베이스에서 자산 데이터 가져오기 - JOIN을 사용하여 코드값 대신 설명 가져오기
-    sql = """
-        SELECT 
-            ta.pnum, ta.itamnum, ta.servername, ta.ip, ta.hostname, ta.center, 
-            ta.loc1, ta.loc2, ig.state AS group_state, ta.vcenter, ta.datein, ta.dateout, 
-            ta.eos, ta.eosl, ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
-            io_power.state AS power, ta.pdu, io_os.state AS os, ta.osver, 
-            ta.maker, ta.model, ta.serial, io_domain.state AS domain, ta.charge3,
-            ta.usize, ta.vmpnum, ta.dateinsert, ta.cpucore, ta.memory, ta.dateupdate, ta.isfix
-        FROM total_asset ta
-        LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
-        LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
-        LEFT JOIN info_power io_power ON ta.power = io_power.power
-        LEFT JOIN info_os io_os ON ta.os = io_os.os
-        LEFT JOIN info_domain io_domain ON ta.domain = io_domain.domain
-        LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
-    """
-    data = execute_query(sql)
+    """자산 데이터 내보내기 (열 선택 지원)"""
+    # 선택된 열 (POST: 모달에서 선택, GET: 전체)
+    col_order = [
+        'pnum', 'hostname', 'servername', 'grp', 'oper', 'status', 'center', 'network_zone',
+        'asset_type', 'purpose', 'ip', 'loc1', 'loc2', 'usize', 'maker', 'model', 'serial',
+        'os', 'osver', 'cpucore', 'cpusocket', 'memory', 'datein', 'dateout',
+        'hw_eos', 'hw_eosl', 'importance', 'power', 'watt', 'ampere',
+        'charge', 'charge2', 'charge3', 'memo'
+    ]
+    if request.method == 'POST':
+        chosen = request.form.getlist('columns')
+        # 순서 유지
+        col_order = [c for c in col_order if c in chosen] or col_order
 
-    # 데이터프레임 생성
-    df = pd.DataFrame(data)
-
-    # 컬럼명 한글로 변경
-    column_mapping = {
-        'pnum': '자산고유번호',
-        'itamnum': 'ITAM자산번호',
-        'servername': '서버명',
-        'ip': 'IP 주소',
-        'hostname': '호스트 이름',
-        'center': '센터',
-        'loc1': '상면번호',
-        'loc2': '상단번호',
-        'group_state': '그룹',
-        'vcenter': '상위 자산',
-        'datein': '설치일자',
-        'dateout': '폐기일자',
-        'eos': 'EOS 일자',
-        'eosl': 'EOSL 일자',
-        'charge': '담당자(정)',
-        'charge2': '담당자(부)',
-        'isoper': '사용여부',
-        'oper': '서비스구분',
-        'power': '전원이중화',
-        'pdu': 'PDU',
-        'os': 'OS',
-        'osver': 'OS버전',
-        'maker': '제조사',
-        'model': '모델',
-        'serial': '시리얼넘버',
-        'domain': '도메인',
-        'charge3': '현업담당자',
-        'usize': '장비크기',
-        'vmpnum': 'VM번호',
-        'dateinsert': '등록일시',
-        'cpucore': '물리코어',
-        'memory': '메모리크기',
-        'dateupdate': '업데이트일시',
-        'isfix': '변경확인'
+    label_map = {
+        'pnum': '자산번호', 'hostname': 'Hostname', 'servername': '서버명',
+        'grp': '그룹', 'oper': '운영구분', 'status': '자산상태', 'center': '센터',
+        'network_zone': '망', 'asset_type': '물리/논리', 'purpose': '용도',
+        'ip': 'IP 주소', 'loc1': '상면번호', 'loc2': '상단번호', 'usize': 'U사이즈',
+        'maker': '제조사', 'model': '모델명', 'serial': '시리얼',
+        'os': 'OS', 'osver': 'OS버전', 'cpucore': 'CPU코어',
+        'cpusocket': 'CPU소켓', 'memory': '메모리(GB)',
+        'datein': '도입일자', 'dateout': '폐기일자',
+        'hw_eos': 'HW EOS', 'hw_eosl': 'HW EOSL',
+        'importance': '중요도', 'power': '전원이중화',
+        'watt': '소비전력(W)', 'ampere': '사용전류(A)',
+        'charge': '담당(정)', 'charge2': '담당(부)', 'charge3': '서비스담당', 'memo': '메모',
     }
 
-    # 컬럼명 변경
-    df.rename(columns=column_mapping, inplace=True)
+    sql = """
+        SELECT ai.*,
+               GROUP_CONCAT(aip.ip ORDER BY aip.id SEPARATOR ', ') AS ip
+        FROM asset_info ai
+        LEFT JOIN asset_ip aip ON ai.pnum = aip.asset_pnum
+        GROUP BY ai.pnum
+        ORDER BY ai.pnum
+    """
+    rows = execute_query(sql)
+    if not rows:
+        rows = []
 
-    # 변경확인 값 변환 (0 -> '확인완료', 1 -> '확인필요')
-    if '변경확인' in df.columns:
-        df['변경확인'] = df['변경확인'].map({0: '확인완료', 1: '확인필요'})
+    # 선택된 열만 추출
+    records = [{c: (row.get(c) or '') for c in col_order} for row in rows]
+    df = pd.DataFrame(records, columns=col_order)
+    df.rename(columns=label_map, inplace=True)
 
-    # 엑셀 파일로 저장
     today = datetime.now().strftime('%Y%m%d')
-    export_filename = f'asset_{today}.xlsx'
-    export_filepath = os.path.join(os.getcwd(), 'exports', export_filename)
+    export_filepath = os.path.join(os.getcwd(), 'exports', f'asset_{today}.xlsx')
+    os.makedirs(os.path.dirname(export_filepath), exist_ok=True)
 
-    # exports 폴더가 없으면 생성
-    if not os.path.exists(os.path.dirname(export_filepath)):
-        os.makedirs(os.path.dirname(export_filepath))
-
-    # 엑셀 파일 생성
     with pd.ExcelWriter(export_filepath, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='자산목록')
-
-        # 열 너비 자동 조정
-        worksheet = writer.sheets['자산목록']
-        for i, column in enumerate(df.columns):
-            column_width = max(df[column].astype(str).map(len).max(), len(column) + 2)
-            worksheet.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = column_width
+        ws = writer.sheets['자산목록']
+        for i, col in enumerate(df.columns, 1):
+            max_len = max(df[col].astype(str).map(len).max() if len(df) else 0, len(col) + 2)
+            ws.column_dimensions[get_column_letter(i)].width = min(max_len + 2, 40)
 
     return send_file(export_filepath, as_attachment=True)
 
 
 @asset_bp.route('/export_filtered_asset')
 def export_filtered_asset():
-    """현재 검색된 자산 데이터만 내보내기"""
-    # 세션에서 마지막 검색 쿼리와 파라미터 가져오기
-    last_search_query = session.get('last_search_query')
-    last_search_params = session.get('last_search_params', [])
+    """검색결과 내보내기 (세션 마지막 쿼리 재사용)"""
+    last_sql = session.get('last_search_query')
+    last_params = session.get('last_search_params', [])
 
-    if not last_search_query:
-        # 검색 쿼리가 없으면 기본 쿼리 사용 (isfix=0인 자산만)
-        last_search_query = """
-            SELECT 
-                ta.pnum, ta.itamnum, ta.servername, ta.ip, ta.hostname, ta.center, 
-                ta.loc1, ta.loc2, ig.state AS group_state, ta.vcenter, ta.datein, ta.dateout, 
-                ta.eos, ta.eosl, ta.charge, ta.charge2, io_isoper.state AS isoper, io_oper.state AS oper, 
-                io_power.state AS power, ta.pdu, io_os.state AS os, ta.osver, 
-                ta.maker, ta.model, ta.serial, io_domain.state AS domain, ta.charge3,
-                ta.usize, ta.vmpnum, ta.dateinsert, ta.cpucore, ta.memory, ta.dateupdate, ta.isfix
-            FROM total_asset ta
-            LEFT JOIN info_isoper io_isoper ON ta.isoper = io_isoper.isoper
-            LEFT JOIN info_oper io_oper ON ta.oper = io_oper.oper
-            LEFT JOIN info_power io_power ON ta.power = io_power.power
-            LEFT JOIN info_os io_os ON ta.os = io_os.os
-            LEFT JOIN info_domain io_domain ON ta.domain = io_domain.domain
-            LEFT JOIN info_group ig ON ta.`group` = ig.`group` AND ta.domain = ig.domain
-            WHERE ta.isfix = 0
+    if not last_sql:
+        last_sql = """
+            SELECT ai.*, GROUP_CONCAT(aip.ip ORDER BY aip.id SEPARATOR ', ') AS ip
+            FROM asset_info ai
+            LEFT JOIN asset_ip aip ON ai.pnum = aip.asset_pnum
+            GROUP BY ai.pnum ORDER BY ai.pnum DESC
         """
-        last_search_params = []
+        last_params = []
 
-    # 데이터 가져오기
-    data = execute_query(last_search_query, last_search_params)
-
-    # 데이터프레임 생성
-    df = pd.DataFrame(data)
-
-    # 컬럼명 한글로 변경
-    column_mapping = {
-        'pnum': '자산고유번호',
-        'itamnum': 'ITAM자산번호',
-        'servername': '서버명',
-        'ip': 'IP 주소',
-        'hostname': '호스트 이름',
-        'center': '센터',
-        'loc1': '상면번호',
-        'loc2': '상단번호',
-        'group_state': '그룹',
-        'vcenter': '상위 자산',
-        'datein': '설치일자',
-        'dateout': '폐기일자',
-        'eos': 'EOS 일자',
-        'eosl': 'EOSL 일자',
-        'charge': '담당자(정)',
-        'charge2': '담당자(부)',
-        'isoper': '사용여부',
-        'oper': '서비스구분',
-        'power': '전원이중화',
-        'pdu': 'PDU',
-        'os': 'OS',
-        'osver': 'OS버전',
-        'maker': '제조사',
-        'model': '모델',
-        'serial': '시리얼넘버',
-        'domain': '도메인',
-        'charge3': '현업담당자',
-        'usize': '장비크기',
-        'vmpnum': 'VM번호',
-        'dateinsert': '등록일시',
-        'cpucore': '물리코어',
-        'memory': '메모리크기',
-        'dateupdate': '업데이트일시',
-        'isfix': '변경확인'
+    rows = execute_query(last_sql, last_params) or []
+    label_map = {
+        'pnum': '자산번호', 'hostname': 'Hostname', 'servername': '서버명',
+        'grp': '그룹', 'oper': '운영구분', 'status': '자산상태', 'center': '센터',
+        'network_zone': '망', 'asset_type': '물리/논리', 'purpose': '용도',
+        'ip': 'IP 주소', 'loc1': '상면번호', 'loc2': '상단번호', 'usize': 'U사이즈',
+        'maker': '제조사', 'model': '모델명', 'serial': '시리얼',
+        'os': 'OS', 'osver': 'OS버전', 'cpucore': 'CPU코어',
+        'cpusocket': 'CPU소켓', 'memory': '메모리(GB)',
+        'datein': '도입일자', 'dateout': '폐기일자',
+        'hw_eos': 'HW EOS', 'hw_eosl': 'HW EOSL',
+        'importance': '중요도', 'power': '전원이중화',
+        'watt': '소비전력(W)', 'ampere': '사용전류(A)',
+        'charge': '담당(정)', 'charge2': '담당(부)', 'charge3': '서비스담당', 'memo': '메모',
     }
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df.rename(columns={k: v for k, v in label_map.items() if k in df.columns}, inplace=True)
 
-    # 컬럼명 변경
-    df.rename(columns=column_mapping, inplace=True)
-
-    # 변경확인 값 변환 (0 -> '확인완료', 1 -> '확인필요')
-    if '변경확인' in df.columns:
-        df['변경확인'] = df['변경확인'].map({0: '확인완료', 1: '확인필요'})
-
-    # 엑셀 파일로 저장
     today = datetime.now().strftime('%Y%m%d')
-    export_filename = f'asset_filtered_{today}.xlsx'
-    export_filepath = os.path.join(os.getcwd(), 'exports', export_filename)
+    fpath = os.path.join(os.getcwd(), 'exports', f'asset_filtered_{today}.xlsx')
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
 
-    # exports 폴더가 없으면 생성
-    if not os.path.exists(os.path.dirname(export_filepath)):
-        os.makedirs(os.path.dirname(export_filepath))
-
-    # 엑셀 파일 생성
-    with pd.ExcelWriter(export_filepath, engine='openpyxl') as writer:
+    with pd.ExcelWriter(fpath, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='검색결과')
+        ws = writer.sheets['검색결과']
+        for i, col in enumerate(df.columns, 1):
+            max_len = max(df[col].astype(str).map(len).max() if len(df) else 0, len(col) + 2)
+            ws.column_dimensions[get_column_letter(i)].width = min(max_len + 2, 40)
 
-        # 열 너비 자동 조정
-        worksheet = writer.sheets['검색결과']
-        for i, column in enumerate(df.columns):
-            column_width = max(df[column].astype(str).map(len).max(), len(column) + 2)
-            worksheet.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = column_width
+    return send_file(fpath, as_attachment=True)
 
-    return send_file(export_filepath, as_attachment=True)
 
+@asset_bp.route('/export_bulk')
+def export_bulk():
+    """일괄 등록/수정용 전체 자산 xlsx 다운로드 (pnum 포함)"""
+    sql = """
+        SELECT ai.pnum, ai.hostname, ai.servername, ai.grp, ai.oper, ai.status, ai.center,
+               ai.network_zone, ai.asset_type, ai.purpose,
+               GROUP_CONCAT(aip.ip ORDER BY aip.id SEPARATOR ', ') AS ip,
+               ai.loc1, ai.loc2, ai.usize, ai.maker, ai.model, ai.serial,
+               ai.os, ai.osver, ai.cpucore, ai.cpusocket, ai.memory,
+               ai.datein, ai.dateout, ai.hw_eos, ai.hw_eosl,
+               ai.importance, ai.power, ai.watt, ai.ampere,
+               ai.charge, ai.charge2, ai.charge3, ai.memo
+        FROM asset_info ai
+        LEFT JOIN asset_ip aip ON ai.pnum = aip.asset_pnum
+        GROUP BY ai.pnum
+        ORDER BY ai.pnum
+    """
+    rows = execute_query(sql) or []
+    df = pd.DataFrame(rows)
+
+    today = datetime.now().strftime('%Y%m%d')
+    fpath = os.path.join(os.getcwd(), 'exports', f'asset_bulk_{today}.xlsx')
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+
+    with pd.ExcelWriter(fpath, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='자산목록')
+        ws = writer.sheets['자산목록']
+        for i, col in enumerate(df.columns, 1):
+            max_len = max(df[col].astype(str).map(len).max() if len(df) else 0, len(col) + 2)
+            ws.column_dimensions[get_column_letter(i)].width = min(max_len + 2, 40)
+
+    return send_file(fpath, as_attachment=True)
+
+
+@asset_bp.route('/bulk_upsert_asset', methods=['POST'])
+def bulk_upsert_asset():
+    """일괄 등록/수정 처리 (pnum 존재 → UPDATE, 없으면 INSERT)"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': '파일이 없습니다.'})
+
+    f = request.files['file']
+    if not f.filename.endswith('.xlsx'):
+        return jsonify({'success': False, 'message': 'xlsx 파일만 업로드 가능합니다.'})
+
+    try:
+        import io
+        df = pd.read_excel(io.BytesIO(f.read()), engine='openpyxl')
+        df = df.where(pd.notnull(df), None)  # NaN → None
+
+        # DB에 존재하는 pnum 목록
+        existing = {row['pnum'] for row in execute_query("SELECT pnum FROM asset_info")}
+
+        inserted = updated = 0
+        for _, row in df.iterrows():
+            pnum = row.get('pnum')
+            data = {k: (str(v) if v is not None else None)
+                    for k, v in row.items() if k != 'pnum' and k in (
+                        'hostname', 'servername', 'grp', 'oper', 'status', 'center',
+                        'network_zone', 'asset_type', 'purpose', 'loc1', 'loc2', 'usize',
+                        'maker', 'model', 'serial', 'os', 'osver', 'cpucore', 'cpusocket',
+                        'memory', 'datein', 'dateout', 'hw_eos', 'hw_eosl',
+                        'importance', 'power', 'watt', 'ampere',
+                        'charge', 'charge2', 'charge3', 'memo'
+                    )}
+            data['dateupdate'] = datetime.now()
+
+            # IP 처리
+            ip_raw = row.get('ip') or ''
+
+            if pnum and int(pnum) in existing:
+                update_asset_info(int(pnum), data)
+                ip_list = parse_ip_input(str(ip_raw))
+                replace_asset_ips(int(pnum), ip_list)
+                updated += 1
+            else:
+                new_pnum = insert_asset_info(data)
+                ip_list = parse_ip_input(str(ip_raw))
+                replace_asset_ips(new_pnum, ip_list)
+                inserted += 1
+
+        _invalidate_asset_cache()
+        return jsonify({
+            'success': True,
+            'message': f'처리 완료: 신규 {inserted}건 등록, {updated}건 수정되었습니다.'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'처리 중 오류: {str(e)}'})
 
 @asset_bp.route('/download_template')
 def download_template():
@@ -1781,7 +1356,7 @@ def bulk_upload():
                 'usize': row[25],
                 'cpucore': row[26],
                 'memory': row[27],
-                'vcenter': row[28] if row[8] == '논리' else None,
+                'vcenter': row[28] if row[8] == '논리' else None
             })
 
         # 오류가 있으면 처리 중단
@@ -1928,3 +1503,90 @@ def bulk_upload():
 def allowed_file(filename):
     """허용된 파일 형식인지 검사"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'xlsx'}
+
+
+# ─────────────────────────────────────────────
+# 내부 헬퍼: 폼 데이터 수집 / 캐시 무효화
+# ─────────────────────────────────────────────
+
+def _parse_date(val):
+    try:
+        return datetime.strptime(val, '%Y-%m-%d').date() if val else None
+    except ValueError:
+        return None
+
+
+def _collect_form_data() -> dict:
+    """asset/form.html 의 POST 데이터를 asset_info 컬럼 dict 로 변환"""
+    f = request.form
+    return {
+        "hostname":     f.get('hostname')    or None,
+        "servername":   f.get('servername')  or None,
+        "grp":          f.get('grp')         or None,
+        "oper":         f.get('oper')        or None,
+        "center":       f.get('center')      or None,
+        "network_zone": f.get('network_zone') or None,
+        "asset_type":   f.get('asset_type')  or None,
+        "purpose":      ",".join(f.getlist('purpose')) or None,
+        "loc1":         f.get('loc1')        or None,
+        "loc2":         f.get('loc2', type=int),
+        "usize":        f.get('usize', type=int) or 1,
+        "maker":        f.get('maker')       or None,
+        "model":        f.get('model')       or None,
+        "serial":       f.get('serial')      or None,
+        "os":           f.get('os')          or None,
+        "osver":        f.get('osver')       or None,
+        "cpucore":      f.get('cpucore', type=int),
+        "cpusocket":    f.get('cpusocket', type=int),
+        "memory":       f.get('memory', type=float),
+        "datein":       _parse_date(f.get('datein')),
+        "dateout":      _parse_date(f.get('dateout')),
+        "hw_eos":       _parse_date(f.get('hw_eos')),
+        "hw_eosl":      _parse_date(f.get('hw_eosl')),
+        "status":       f.get('status')      or '사용',
+        "importance":   f.get('importance')  or '일반',
+        "power":        f.get('power')       or None,
+        "watt":         f.get('watt', type=float),
+        "ampere":       f.get('ampere', type=float),
+        "charge":       f.get('charge')      or None,
+        "charge2":      f.get('charge2')     or None,
+        "charge3":      f.get('charge3')     or None,
+        "memo":         f.get('memo')        or None,
+        "dateupdate":   datetime.now(),
+    }
+
+
+def _collect_links() -> list:
+    """폼에서 연계 정보 목록 수집. 동적 행 기반 (link_type_N, link_id_N)"""
+    links = []
+    idx = 0
+    while True:
+        stype = request.form.get(f'link_type_{idx}')
+        sid   = request.form.get(f'link_id_{idx}')
+        if stype is None:
+            break
+        if stype.strip() and sid.strip():
+            links.append({"system_type": stype.strip(), "system_id": sid.strip()})
+        idx += 1
+    return links
+
+
+def _collect_relations() -> list:
+    """폼에서 자산관계 목록 수집. 동적 행 기반 (rel_parent_N, rel_type_N)"""
+    relations = []
+    idx = 0
+    while True:
+        parent = request.form.get(f'rel_parent_{idx}', type=int)
+        rtype  = request.form.get(f'rel_type_{idx}')
+        if request.form.get(f'rel_parent_{idx}') is None:
+            break
+        if parent and rtype:
+            relations.append({"parent_pnum": parent, "relation_type": rtype.strip()})
+        idx += 1
+    return relations
+
+
+def _invalidate_asset_cache():
+    invalidate_cache_pattern('index_data')
+    invalidate_cache_pattern('asset_data')
+    invalidate_cache_pattern('asset_graph')

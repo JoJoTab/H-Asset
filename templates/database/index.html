@@ -262,7 +262,7 @@ function renderTable(page, per_page) {
                         <td>${db.dbsafer_port || ""}</td>
                         <td>${db.hostname || ""}</td>
                         <td>${db.instance || ""}</td>
-                        <td><span class="badge isoper-${db.isoper}">${db.isoper_state || ""}</span></td>
+                        <td>${db.use_flag || ""}</span></td>
                     </tr>
                 `).join('');
             }

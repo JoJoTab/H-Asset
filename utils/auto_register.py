@@ -389,15 +389,87 @@ def auto_map_assets():
     SET va.pnum = ta.pnum
     WHERE va.pnum IS NULL
     """
-
-    result = execute_query(sql, fetch_all=False)
-
+    execute_query(sql, fetch_all=False)
     print("자동 자산 맵핑 완료")
 
 
+def sync_vmware_relation(pnum, cluster_host, parent_host):
+    """vmware parent_host 기준으로 asset_relation(VM 상위) 동기화.
+    vmware_hosts.pnum이 NULL이면 skip.
+    반환값: True(동기화됨), False(skip)"""
+    if not pnum or not cluster_host or not parent_host:
+        return False
+
+    host = execute_query(
+        "SELECT pnum FROM vmware_hosts WHERE cluster_host = %s AND host_name = %s AND pnum IS NOT NULL",
+        (cluster_host, parent_host),
+        fetch_all=False,
+    )
+    if not host:
+        return False
+
+    host_pnum = host['pnum']
+
+    existing = execute_query(
+        "SELECT id FROM asset_relation WHERE child_pnum = %s AND relation_type = 'VM'",
+        (pnum,),
+        fetch_all=False,
+    )
+    if existing:
+        execute_query(
+            "UPDATE asset_relation SET parent_pnum = %s WHERE id = %s",
+            (host_pnum, existing['id']),
+            fetch_all=False,
+        )
+    else:
+        execute_query(
+            "INSERT INTO asset_relation (parent_pnum, child_pnum, relation_type) VALUES (%s, %s, 'VM')",
+            (host_pnum, pnum),
+            fetch_all=False,
+        )
+    return True
+
+
+def sync_all_vmware_relations():
+    """vmware_assets에서 IP+hostname 기준으로 total_asset을 식별하고
+    vmware_assets.pnum 갱신 및 asset_relation(VM 상위) 일괄 동기화.
+
+    - vmware_hosts.pnum이 NULL인 항목은 skip → 나중에 재실행 가능
+    - asset_relation에서 child_pnum 당 VM 관계는 1개만 유지
+    반환: {'matched': int, 'synced': int, 'skipped': int}"""
+    matched_vms = execute_query(
+        """SELECT ta.pnum  AS asset_pnum,
+                  va.vm_id,
+                  va.cluster_host,
+                  va.parent_host
+           FROM vmware_assets va
+           JOIN total_asset ta
+             ON va.hostname = ta.hostname AND va.ip = ta.ip
+           WHERE va.parent_host IS NOT NULL"""
+    )
+
+    synced = 0
+    skipped = 0
+    for vm in matched_vms:
+        # vmware_assets.pnum 갱신 (아직 미설정이거나 다른 pnum인 경우)
+        execute_query(
+            "UPDATE vmware_assets SET pnum = %s WHERE vm_id = %s AND (pnum IS NULL OR pnum != %s)",
+            (vm['asset_pnum'], vm['vm_id'], vm['asset_pnum']),
+            fetch_all=False,
+        )
+        # asset_relation 동기화
+        if sync_vmware_relation(vm['asset_pnum'], vm['cluster_host'], vm['parent_host']):
+            synced += 1
+        else:
+            skipped += 1
+
+    print(f"VMware 자산 연동 완료: 매칭 {len(matched_vms)}건, 관계 동기화 {synced}건, skip {skipped}건")
+    return {'matched': len(matched_vms), 'synced': synced, 'skipped': skipped}
+
+
 def update_vcenter_from_host(vm_pnum, host_name, cluster_host):
-    """Host의 pnum을 사용하여 VM 자산의 vcenter 업데이트"""
-    pass
+    """parent_host 변경 시 asset_relation VM 상위를 갱신"""
+    sync_vmware_relation(vm_pnum, cluster_host, host_name)
 
 
 def handle_auto_registered_assets(action, selected_assets):

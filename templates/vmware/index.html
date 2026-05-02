@@ -48,13 +48,17 @@
     </div>
 </div>
 
-<!-- 자동 맵핑 버튼 -->
+<!-- 액션 버튼 -->
 <div class="row mb-3">
     <div class="col-md-12">
-        <form action="{{ url_for('vmware.auto_map') }}" method="POST" style="display: inline;">
-            <button type="submit" class="btn btn-primary">자동 맵핑 실행</button>
+        <form action="{{ url_for('vmware.sync_relations') }}" method="POST" style="display: inline;"
+              onsubmit="return confirm('VMware 자산 연동을 실행합니다.\n\n- IP+Hostname 기준으로 자산 관리 대상을 식별합니다.\n- 자산 관계(VM 상위)를 일괄 생성/갱신합니다.\n- Host가 자산에 맵핑되지 않은 경우는 skip됩니다.\n\n계속하시겠습니까?');">
+            <button type="submit" class="btn btn-primary">자산 연동</button>
         </form>
-        <a href="{{ url_for('vmware.changes') }}" class="btn btn-info">변경 이력 보기</a>
+        <form action="{{ url_for('vmware.auto_map') }}" method="POST" style="display: inline;">
+            <button type="submit" class="btn btn-outline-secondary btn-sm" title="pnum 매핑만 실행 (자산 관계 제외)">pnum 맵핑만</button>
+        </form>
+        <a href="{{ url_for('vmware.changes') }}" class="btn btn-info ml-2">변경 이력 보기</a>
         <a href="{{ url_for('vmware.hosts') }}" class="btn btn-success">Host 관리</a>
     </div>
 </div>

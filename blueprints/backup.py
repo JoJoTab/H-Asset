@@ -287,36 +287,45 @@ def _map_legacy_excel_row(row, source_file):
     }
 
 
+REQUIRED_NEW_COLUMNS = [
+    'Client Name', 'Job Duration', 'Job File Count', 'Job Primary ID',
+    'Schedule/Level Type', 'Master Server', 'Media Server', 'Policy Name', 'Job Type',
+    'Schedule Name', 'Protected Data Size(GB)', 'Job Start Time', 'Job End Time',
+    'Post Deduplication Size(GB)', 'Total Optimization % (Accelerator + Deduplication)',
+    'Job Status', 'Code Status'
+]
+REQUIRED_LEGACY_COLUMNS = ['시작시간', '종료시간', '정책명', '스케줄명', '상태', '용량(GB)', 'Type']
+
+
 def import_backup_history_dataframe(df, source_file='manual-upload'):
     ensure_backup_history_schema()
     df = _normalize_columns(df)
 
-    required_new_columns = [
-        'Client Name', 'Job Duration', 'Job File Count', 'Job Primary ID',
-        'Schedule/Level Type', 'Master Server', 'Media Server', 'Policy Name', 'Job Type',
-        'Schedule Name', 'Protected Data Size(GB)', 'Job Start Time', 'Job End Time',
-        'Post Deduplication Size(GB)', 'Total Optimization % (Accelerator + Deduplication)',
-        'Job Status', 'Code Status'
-    ]
-    is_new_format = all(col in df.columns for col in required_new_columns)
-    is_legacy_format = all(col in df.columns for col in ['시작시간', '종료시간', '정책명', '스케줄명', '상태', '용량(GB)', 'Type'])
+    is_new_format = all(col in df.columns for col in REQUIRED_NEW_COLUMNS)
+    is_legacy_format = all(col in df.columns for col in REQUIRED_LEGACY_COLUMNS)
 
     if not is_new_format and not is_legacy_format:
-        return {'inserted': 0, 'updated': 0, 'failed': len(df), 'error': '지원하지 않는 이력 파일 형식입니다.'}
+        missing_new = [c for c in REQUIRED_NEW_COLUMNS if c not in df.columns]
+        missing_legacy = [c for c in REQUIRED_LEGACY_COLUMNS if c not in df.columns]
+        detail = f'신규 형식 누락 컬럼: {missing_new}' if len(missing_new) <= len(missing_legacy) else f'레거시 형식 누락 컬럼: {missing_legacy}'
+        return {'inserted': 0, 'updated': 0, 'failed': len(df), 'error': f'지원하지 않는 이력 파일 형식입니다. ({detail})'}
 
     inserted = 0
     updated = 0
     failed = 0
+    row_errors = []
 
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            for _, row in df.iterrows():
+            for idx, row in df.iterrows():
+                row_num = idx + 1
                 try:
                     row_data = _map_new_csv_row(row, source_file) if is_new_format else _map_legacy_excel_row(row, source_file)
 
                     if not row_data.get('policy_name') or not row_data.get('schedule_name'):
                         failed += 1
+                        row_errors.append(f'행 {row_num}: Policy Name 또는 Schedule Name 누락 (policy={row_data.get("policy_name")!r}, schedule={row_data.get("schedule_name")!r})')
                         continue
 
                     action = _upsert_backup_history_row(cursor, row_data)
@@ -324,14 +333,15 @@ def import_backup_history_dataframe(df, source_file='manual-upload'):
                         updated += 1
                     else:
                         inserted += 1
-                except Exception:
+                except Exception as e:
                     failed += 1
+                    row_errors.append(f'행 {row_num}: {str(e)}')
                     continue
         connection.commit()
     finally:
         connection.close()
 
-    return {'inserted': inserted, 'updated': updated, 'failed': failed, 'error': None}
+    return {'inserted': inserted, 'updated': updated, 'failed': failed, 'error': None, 'row_errors': row_errors}
 
 
 def import_backup_history_csv_file(file_path):
@@ -1383,6 +1393,66 @@ def api_collect_backup_history():
         return jsonify({'error': str(e)}), 500
 
 
+@backup_bp.route('/api/auto-map-schedule-assets', methods=['POST'])
+def api_auto_map_schedule_assets():
+    """backup_schedule의 IP + Hostname 기준으로 total_asset 자동 맵핑.
+    이미 연계된 스케줄도 매칭 결과가 다르면 갱신한다."""
+    try:
+        matches = execute_query("""
+            SELECT bs.id   AS schedule_id,
+                   ta.pnum AS asset_pnum
+            FROM backup_schedule bs
+            JOIN total_asset ta
+              ON bs.hostname   = ta.hostname
+             AND bs.ip_address = ta.ip
+            WHERE bs.hostname   IS NOT NULL AND bs.hostname   NOT IN ('', 'None')
+              AND bs.ip_address IS NOT NULL AND bs.ip_address NOT IN ('', 'None', '0.0.0.0')
+        """) or []
+
+        if not matches:
+            return jsonify({'success': True,
+                            'message': '매칭된 스케줄이 없습니다.',
+                            'mapped': 0, 'updated': 0})
+
+        mapped = updated = 0
+        connection = get_db_connection()
+        try:
+            with connection.cursor() as cursor:
+                for m in matches:
+                    cursor.execute(
+                        "SELECT id FROM backup_schedule_asset_link WHERE schedule_id = %s",
+                        (m['schedule_id'],)
+                    )
+                    existing = cursor.fetchone()
+                    if existing:
+                        cursor.execute(
+                            """UPDATE backup_schedule_asset_link
+                               SET asset_pnum = %s, linked_at = NOW()
+                               WHERE schedule_id = %s""",
+                            (m['asset_pnum'], m['schedule_id'])
+                        )
+                        updated += 1
+                    else:
+                        cursor.execute(
+                            """INSERT INTO backup_schedule_asset_link (schedule_id, asset_pnum)
+                               VALUES (%s, %s)""",
+                            (m['schedule_id'], m['asset_pnum'])
+                        )
+                        mapped += 1
+            connection.commit()
+        finally:
+            connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': f'자동 맵핑 완료: 신규 {mapped}건, 갱신 {updated}건',
+            'mapped': mapped,
+            'updated': updated,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @backup_bp.route('/api/schedule-by-policy')
 def api_schedule_by_policy():
     """Policy와 Schedule로 스케줄 조회"""
@@ -2126,21 +2196,37 @@ def upload_backup_history():
 
         if lower_name.endswith('.csv'):
             df = pd.read_csv(file, encoding='utf-8-sig')
+            df = _normalize_columns(df)
         else:
-            try:
-                df = pd.read_excel(file)
-            except Exception:
+            # 헤더 행 자동 탐색: 0(기본), 3(설명 3행 포함 템플릿) 순으로 시도
+            df = None
+            for header_row in [0, 3, 4]:
                 file.stream.seek(0)
-                df = pd.read_excel(file, header=4)
+                try:
+                    candidate = pd.read_excel(file, header=header_row)
+                except Exception:
+                    continue
+                candidate = _normalize_columns(candidate)
+                is_new = all(c in candidate.columns for c in REQUIRED_NEW_COLUMNS)
+                is_legacy = all(c in candidate.columns for c in REQUIRED_LEGACY_COLUMNS)
+                if is_new or is_legacy:
+                    df = candidate
+                    break
+            if df is None:
+                file.stream.seek(0)
+                df = pd.read_excel(file, header=0)
 
         result = import_backup_history_dataframe(df, source_file=file.filename)
         if result.get('error'):
             return jsonify({'error': result['error']}), 400
 
-        return jsonify({
+        response = {
             'success': True,
             'message': f"업로드 완료: 신규 {result['inserted']}건, 갱신 {result['updated']}건, 실패 {result['failed']}건"
-        })
+        }
+        if result.get('row_errors'):
+            response['row_errors'] = result['row_errors']
+        return jsonify(response)
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500

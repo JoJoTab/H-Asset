@@ -361,40 +361,43 @@ def index_detail():
         selected_columns = ['pnum'] + selected_columns
 
     column_mapping = {
-        'pnum':         '자산번호',
-        'hostname':     'Hostname',
-        'servername':   '서버명',
-        'grp':          '그룹',
-        'oper':         '운영구분',
-        'status':       '자산상태',
-        'center':       '센터',
-        'network_zone': '망',
-        'asset_type':   '물리/논리',
-        'purpose':      '용도',
-        'ip':           'IP 주소',
-        'loc1':         '상면번호',
-        'loc2':         '상단번호',
-        'usize':        'U사이즈',
-        'maker':        '제조사',
-        'model':        '모델명',
-        'serial':       '시리얼',
-        'os':           'OS',
-        'osver':        'OS버전',
-        'cpucore':      'CPU코어',
-        'cpusocket':    'CPU소켓',
-        'memory':       '메모리(GB)',
-        'datein':       '도입일자',
-        'dateout':      '폐기일자',
-        'hw_eos':       'HW EOS',
-        'hw_eosl':      'HW EOSL',
-        'importance':   '중요도',
-        'power':        '전원이중화',
-        'watt':         '소비전력(W)',
-        'ampere':       '사용전류(A)',
-        'charge':       '담당(정)',
-        'charge2':      '담당(부)',
-        'charge3':      '서비스담당',
-        'memo':         '메모',
+        'pnum':                 '자산번호',
+        'hostname':             'Hostname',
+        'servername':           '서버명',
+        'grp':                  '그룹',
+        'oper':                 '운영구분',
+        'status':               '자산상태',
+        'center':               '센터',
+        'network_zone':         '망',
+        'asset_type':           '물리/논리',
+        'purpose':              '용도',
+        'ip':                   'IP 주소',
+        'loc1':                 '상면번호',
+        'loc2':                 '상단번호',
+        'usize':                'U사이즈',
+        'maker':                '제조사',
+        'model':                '모델명',
+        'serial':               '시리얼',
+        'os':                   'OS',
+        'osver':                'OS버전',
+        'cpucore':              'CPU코어',
+        'cpusocket':            'CPU소켓',
+        'memory':               '메모리(GB)',
+        'datein':               '도입일자',
+        'dateout':              '폐기일자',
+        'hw_eos':               'HW EOS',
+        'hw_eosl':              'HW EOSL',
+        'importance':           '중요도',
+        'power':                '전원이중화',
+        'watt':                 '소비전력(W)',
+        'ampere':               '사용전류(A)',
+        'charge':               '담당(정)',
+        'charge2':              '담당(부)',
+        'charge3':              '서비스담당',
+        'memo':                 '메모',
+        'vm_parent_servername': '상위VM 서버명',
+        'vm_parent_hostname':   '상위VM Hostname',
+        'vm_parent_ip':         '상위VM IP',
     }
 
     if request.method == 'POST':
@@ -405,9 +408,23 @@ def index_detail():
     # ── SQL 빌드 ─────────────────────────────────────────────
     sql = """
         SELECT ai.*,
-               GROUP_CONCAT(aip.ip ORDER BY aip.id SEPARATOR ', ') AS ip
+               GROUP_CONCAT(DISTINCT aip.ip ORDER BY aip.id SEPARATOR ', ') AS ip,
+               ANY_VALUE(vm_info.vm_parent_servername) AS vm_parent_servername,
+               ANY_VALUE(vm_info.vm_parent_hostname)   AS vm_parent_hostname,
+               ANY_VALUE(vm_info.vm_parent_ip)         AS vm_parent_ip
         FROM asset_info ai
         LEFT JOIN asset_ip aip ON ai.pnum = aip.asset_pnum
+        LEFT JOIN (
+            SELECT ar.child_pnum,
+                   ANY_VALUE(pa.servername) AS vm_parent_servername,
+                   ANY_VALUE(pa.hostname)   AS vm_parent_hostname,
+                   GROUP_CONCAT(DISTINCT paip.ip ORDER BY paip.id SEPARATOR ', ') AS vm_parent_ip
+            FROM asset_relation ar
+            JOIN asset_info pa   ON ar.parent_pnum = pa.pnum
+            LEFT JOIN asset_ip paip ON paip.asset_pnum = pa.pnum
+            WHERE ar.relation_type = 'VM'
+            GROUP BY ar.child_pnum
+        ) vm_info ON vm_info.child_pnum = ai.pnum
         WHERE 1=1
     """
     params = []
@@ -656,11 +673,11 @@ def export_asset():
         'asset_type', 'purpose', 'ip', 'loc1', 'loc2', 'usize', 'maker', 'model', 'serial',
         'os', 'osver', 'cpucore', 'cpusocket', 'memory', 'datein', 'dateout',
         'hw_eos', 'hw_eosl', 'importance', 'power', 'watt', 'ampere',
-        'charge', 'charge2', 'charge3', 'memo'
+        'charge', 'charge2', 'charge3', 'memo',
+        'vm_parent_servername', 'vm_parent_hostname', 'vm_parent_ip',
     ]
     if request.method == 'POST':
         chosen = request.form.getlist('columns')
-        # 순서 유지
         col_order = [c for c in col_order if c in chosen] or col_order
 
     label_map = {
@@ -676,13 +693,30 @@ def export_asset():
         'importance': '중요도', 'power': '전원이중화',
         'watt': '소비전력(W)', 'ampere': '사용전류(A)',
         'charge': '담당(정)', 'charge2': '담당(부)', 'charge3': '서비스담당', 'memo': '메모',
+        'vm_parent_servername': '상위VM 서버명',
+        'vm_parent_hostname':   '상위VM Hostname',
+        'vm_parent_ip':         '상위VM IP',
     }
 
     sql = """
         SELECT ai.*,
-               GROUP_CONCAT(aip.ip ORDER BY aip.id SEPARATOR ', ') AS ip
+               GROUP_CONCAT(DISTINCT aip.ip ORDER BY aip.id SEPARATOR ', ') AS ip,
+               ANY_VALUE(vm_info.vm_parent_servername) AS vm_parent_servername,
+               ANY_VALUE(vm_info.vm_parent_hostname)   AS vm_parent_hostname,
+               ANY_VALUE(vm_info.vm_parent_ip)         AS vm_parent_ip
         FROM asset_info ai
         LEFT JOIN asset_ip aip ON ai.pnum = aip.asset_pnum
+        LEFT JOIN (
+            SELECT ar.child_pnum,
+                   ANY_VALUE(pa.servername) AS vm_parent_servername,
+                   ANY_VALUE(pa.hostname)   AS vm_parent_hostname,
+                   GROUP_CONCAT(DISTINCT paip.ip ORDER BY paip.id SEPARATOR ', ') AS vm_parent_ip
+            FROM asset_relation ar
+            JOIN asset_info pa   ON ar.parent_pnum = pa.pnum
+            LEFT JOIN asset_ip paip ON paip.asset_pnum = pa.pnum
+            WHERE ar.relation_type = 'VM'
+            GROUP BY ar.child_pnum
+        ) vm_info ON vm_info.child_pnum = ai.pnum
         GROUP BY ai.pnum
         ORDER BY ai.pnum
     """
@@ -844,6 +878,126 @@ def bulk_upsert_asset():
         })
     except Exception as e:
         return jsonify({'success': False, 'message': f'처리 중 오류: {str(e)}'})
+
+
+@asset_bp.route('/export_relation_template')
+def export_relation_template():
+    """VM 자산 관계 일괄 등록/수정용 템플릿 다운로드 (기존 VM 관계 포함)"""
+    import io as _io
+    rows = execute_query("""
+        SELECT ar.id          AS relation_id,
+               ar.child_pnum,
+               ci.servername  AS child_servername,
+               ci.hostname    AS child_hostname,
+               ar.parent_pnum,
+               pi.servername  AS parent_servername,
+               pi.hostname    AS parent_hostname
+        FROM asset_relation ar
+        JOIN asset_info ci ON ci.pnum = ar.child_pnum
+        JOIN asset_info pi ON pi.pnum = ar.parent_pnum
+        WHERE ar.relation_type = 'VM'
+        ORDER BY ar.child_pnum
+    """) or []
+
+    df = pd.DataFrame(rows, columns=[
+        'relation_id', 'child_pnum', 'child_servername', 'child_hostname',
+        'parent_pnum', 'parent_servername', 'parent_hostname',
+    ])
+
+    output = _io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='VM관계')
+        ws = writer.sheets['VM관계']
+        # 헤더 설명 행 (맨 위 삽입)
+        ws.insert_rows(1, 2)
+        ws['A1'] = 'VM 자산 관계 일괄 등록/수정 템플릿'
+        ws['A2'] = ('child_pnum(필수): 하위 자산번호 | parent_pnum(필수): 상위 자산번호 | '
+                    'child_servername/child_hostname/parent_servername/parent_hostname: 참고용(수정 무시)')
+        # 열 너비
+        for i, w in enumerate([14, 12, 22, 22, 12, 22, 22], 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name='vm_relation_template.xlsx',
+    )
+
+
+@asset_bp.route('/bulk_upsert_relation', methods=['POST'])
+def bulk_upsert_relation():
+    """VM 자산 관계 일괄 등록/수정.
+    child_pnum 당 VM 관계는 1개만 유지 (중복 시 UPDATE)."""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': '파일이 없습니다.'})
+
+    f = request.files['file']
+    if not f.filename.endswith('.xlsx'):
+        return jsonify({'success': False, 'message': 'xlsx 파일만 업로드 가능합니다.'})
+
+    try:
+        import io as _io
+        df = pd.read_excel(_io.BytesIO(f.read()), engine='openpyxl')
+        # 설명 행이 있을 경우 header=2로 재시도
+        if 'child_pnum' not in df.columns:
+            f.stream.seek(0)
+            df = pd.read_excel(_io.BytesIO(f.read()), engine='openpyxl', header=2)
+        df = df.where(pd.notnull(df), None)
+
+        inserted = updated = failed = 0
+        row_errors = []
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                for idx, row in df.iterrows():
+                    child_pnum  = row.get('child_pnum')
+                    parent_pnum = row.get('parent_pnum')
+                    if not child_pnum or not parent_pnum:
+                        failed += 1
+                        row_errors.append(f'행 {idx + 1}: child_pnum 또는 parent_pnum 누락')
+                        continue
+                    try:
+                        child_pnum  = int(child_pnum)
+                        parent_pnum = int(parent_pnum)
+                    except (ValueError, TypeError):
+                        failed += 1
+                        row_errors.append(f'행 {idx + 1}: pnum 숫자 변환 실패 ({child_pnum}, {parent_pnum})')
+                        continue
+
+                    cursor.execute(
+                        "SELECT id FROM asset_relation WHERE child_pnum = %s AND relation_type = 'VM'",
+                        (child_pnum,)
+                    )
+                    existing = cursor.fetchone()
+                    if existing:
+                        cursor.execute(
+                            "UPDATE asset_relation SET parent_pnum = %s WHERE id = %s",
+                            (parent_pnum, existing['id'])
+                        )
+                        updated += 1
+                    else:
+                        cursor.execute(
+                            "INSERT INTO asset_relation (parent_pnum, child_pnum, relation_type) VALUES (%s, %s, 'VM')",
+                            (parent_pnum, child_pnum)
+                        )
+                        inserted += 1
+            conn.commit()
+        finally:
+            conn.close()
+
+        _invalidate_asset_cache()
+        resp = {
+            'success': True,
+            'message': f'처리 완료: 신규 {inserted}건 등록, {updated}건 수정, {failed}건 실패',
+        }
+        if row_errors:
+            resp['row_errors'] = row_errors
+        return jsonify(resp)
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'처리 중 오류: {str(e)}'})
+
 
 @asset_bp.route('/download_template')
 def download_template():

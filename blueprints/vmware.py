@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, redirect, url_for, request, jsonify, flash
 from utils.db import execute_query
-from utils.auto_register import handle_auto_registered_assets, auto_map_assets
+from utils.auto_register import handle_auto_registered_assets, auto_map_assets, sync_vmware_relation, sync_all_vmware_relations
 from datetime import datetime
 import json
 
@@ -183,8 +183,12 @@ def map_asset(vm_id):
             flash('자산을 선택해주세요.', 'error')
             return redirect(request.url)
 
-        sql = "UPDATE vmware_assets SET pnum = %s WHERE vm_id = %s"
-        execute_query(sql, (pnum, vm_id), fetch_all=False)
+        execute_query("UPDATE vmware_assets SET pnum = %s WHERE vm_id = %s", (pnum, vm_id), fetch_all=False)
+
+        # 맵핑 후 자산 관계(VM 상위) 즉시 동기화
+        vm = execute_query("SELECT cluster_host, parent_host FROM vmware_assets WHERE vm_id = %s", (vm_id,), fetch_all=False)
+        if vm:
+            sync_vmware_relation(pnum, vm['cluster_host'], vm['parent_host'])
 
         flash('자산 맵핑이 완료되었습니다.', 'success')
         return redirect(url_for('vmware.vm_detail', vm_id=vm_id))
@@ -232,6 +236,23 @@ def auto_map():
         flash('자동 맵핑이 완료되었습니다.', 'success')
     except Exception as e:
         flash(f'자동 맵핑 중 오류가 발생했습니다: {str(e)}', 'error')
+
+    return redirect(url_for('vmware.index'))
+
+
+@vmware_bp.route('/sync_relations', methods=['POST'])
+def sync_relations():
+    """VMware 자산 연동: IP+hostname 매칭 → pnum 갱신 → 자산 관계(VM 상위) 일괄 동기화"""
+    try:
+        result = sync_all_vmware_relations()
+        flash(
+            f"자산 연동 완료: 매칭 {result['matched']}건 / "
+            f"관계 동기화 {result['synced']}건 / "
+            f"skip {result['skipped']}건 (host 미맵핑)",
+            'success'
+        )
+    except Exception as e:
+        flash(f'자산 연동 중 오류가 발생했습니다: {str(e)}', 'error')
 
     return redirect(url_for('vmware.index'))
 

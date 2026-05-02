@@ -143,8 +143,20 @@
 
                     <div class="tab-pane fade" id="asset-link" role="tabpanel">
                         <div class="alert alert-info">
-                            <i class="fas fa-info-circle"></i> 스케줄과 자산을 일괄 연계하기 위한 엑셀 파일을 업로드하세요.
+                            <i class="fas fa-info-circle"></i> 스케줄과 자산을 일괄 연계하기 위한 엑셀 파일을 업로드하거나, IP+Hostname 기준 자동 맵핑을 실행하세요.
                         </div>
+
+                        <h6>자동 맵핑</h6>
+                        <p class="text-muted small mb-2">
+                            등록된 스케줄의 <strong>IP + Hostname</strong>이 자산 관리에 동일하게 있으면 자동으로 연계합니다.<br>
+                            이미 연계된 스케줄도 매칭 결과가 다르면 갱신됩니다.
+                        </p>
+                        <button type="button" class="btn btn-success mb-2" id="autoMapBtn" onclick="autoMapScheduleAssets()">
+                            <i class="fas fa-magic"></i> 스케줄-자산 자동 맵핑
+                        </button>
+                        <div id="autoMapResult" class="mt-2"></div>
+
+                        <hr>
 
                         <h6>일괄 연계 양식 다운로드</h6>
                         <p>스케줄 고유 ID와 자산 ID를 매핑하여 일괄 연계합니다.</p>
@@ -774,6 +786,39 @@ function applyColumnSelection() {
 
 function openBulkModal() {
     $('#bulkModal').modal('show');
+}
+
+function autoMapScheduleAssets() {
+    const btn = document.getElementById('autoMapBtn');
+    const resultDiv = document.getElementById('autoMapResult');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 처리 중...';
+    resultDiv.innerHTML = '';
+
+    $.ajax({
+        url: '/backup/api/auto-map-schedule-assets',
+        method: 'POST',
+        success: function(res) {
+            if (res.success) {
+                resultDiv.innerHTML =
+                    '<div class="alert alert-success">' +
+                    '<i class="fas fa-check-circle"></i> ' + res.message +
+                    '</div>';
+                setTimeout(function() { location.reload(); }, 1500);
+            } else {
+                resultDiv.innerHTML =
+                    '<div class="alert alert-danger">' + (res.error || res.message) + '</div>';
+            }
+        },
+        error: function(xhr) {
+            const msg = (xhr.responseJSON && xhr.responseJSON.error) ? xhr.responseJSON.error : '서버 오류가 발생했습니다.';
+            resultDiv.innerHTML = '<div class="alert alert-danger">' + msg + '</div>';
+        },
+        complete: function() {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-magic"></i> 스케줄-자산 자동 맵핑';
+        }
+    });
 }
 
 function openAddScheduleModal() {

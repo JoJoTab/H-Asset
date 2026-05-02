@@ -103,11 +103,7 @@
         }
 
         #sidebar .dropdown-toggle::after {
-            display: block;
-            position: absolute;
-            top: 50%;
-            right: 20px;
-            transform: translateY(-50%);
+            display: none;
         }
 
         #sidebar .dropdown-menu {
@@ -200,26 +196,20 @@
         @media (max-width: 768px) {
             #sidebar {
                 width: var(--sidebar-collapsed-width);
-                left: -var(--sidebar-collapsed-width);
             }
 
-            #sidebar.collapsed {
-                left: 0;
+            #sidebar .menu-text {
+                display: none;
             }
 
             #content {
-                width: 100%;
-                margin-left: 0;
+                width: calc(100% - var(--sidebar-collapsed-width));
+                margin-left: var(--sidebar-collapsed-width);
             }
 
             #content.expanded {
-                width: 100%;
-                margin-left: 0;
-            }
-
-            body.sidebar-visible #content {
-                margin-left: var(--sidebar-collapsed-width);
                 width: calc(100% - var(--sidebar-collapsed-width));
+                margin-left: var(--sidebar-collapsed-width);
             }
         }
     </style>
@@ -404,43 +394,15 @@
                 const currentState = $('#sidebar').hasClass('collapsed') ? 'collapsed' : 'expanded';
                 localStorage.setItem('sidebarState', currentState);
 
-                // 모바일에서는 body에 클래스 추가/제거
-                if ($(window).width() <= 768) {
-                    $('body').toggleClass('sidebar-visible');
-                }
-            });
-
-            // 창 크기 변경 시 처리
-            $(window).resize(function() {
-                if ($(window).width() <= 768) {
-                    $('#sidebar').addClass('collapsed');
-                    $('#content').addClass('expanded');
-
-                    if ($('#sidebar').hasClass('collapsed') && !$('body').hasClass('sidebar-visible')) {
-                        $('#sidebar').css('left', '-' + $('#sidebar').width() + 'px');
-                    }
-                } else {
-                    if (sidebarState !== 'collapsed') {
-                        $('#sidebar').removeClass('collapsed');
-                        $('#content').removeClass('expanded');
-                    }
-                    $('#sidebar').css('left', '0');
-                }
-            });
-
-            // 드롭다운 메뉴 클릭 이벤트 (모바일에서 사이드바가 접혀있을 때)
-            $('.dropdown-toggle').on('click', function() {
-                if ($(window).width() <= 768 && $('#sidebar').hasClass('collapsed')) {
-                    $(this).next('.collapse').collapse('toggle');
-                    return false;
-                }
             });
 
             // 현재 활성화된 메뉴 표시
             const currentUrl = window.location.pathname;
             $('ul.components a').each(function() {
                 const linkUrl = $(this).attr('href');
-                if (linkUrl && currentUrl.includes(linkUrl) && linkUrl !== '/') {
+                if (!linkUrl || linkUrl === '/' || linkUrl.startsWith('#')) return;
+                const isActive = currentUrl === linkUrl || currentUrl.startsWith(linkUrl + '/');
+                if (isActive) {
                     $(this).parent().addClass('active');
                     // 드롭다운 메뉴인 경우 부모 메뉴도 활성화
                     if ($(this).parent().parent().hasClass('collapse')) {

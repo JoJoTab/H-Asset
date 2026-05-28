@@ -2,629 +2,626 @@
 
 {% block content %}
 <h2>상세 검색</h2>
-<hr width="100%" class="divider"/>
+<hr class="divider"/>
 
-<!-- 계층 구조 표시 -->
 <nav aria-label="breadcrumb">
-    <ol class="breadcrumb">
-        {% for item in hierarchy %}
-            {% if item.active %}
-                <li class="breadcrumb-item active" aria-current="page">{{ item.name }}</li>
-            {% else %}
-                <li class="breadcrumb-item"><a href="{{ item.url }}">{{ item.name }}</a></li>
-            {% endif %}
-        {% endfor %}
-    </ol>
+  <ol class="breadcrumb">
+    <div class="col-md-6 text-left">
+      {% for item in hierarchy %}
+        {% if item.active %}
+          <li class="breadcrumb-item active" aria-current="page">{{ item.name }}</li>
+        {% else %}
+          <li class="breadcrumb-item"><a href="{{ item.url }}">{{ item.name }}</a></li>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </ol>
 </nav>
 
 <hr>
 <div>
-    <button class="btn btn-outline-info col-12" id="toggleSearch">상세 검색 열기</button>
+  <button class="btn btn-outline-info col-12" id="toggleSearch">상세 검색 열기</button>
 </div>
-<div class="contents" id="searchFields" style="display: none;">
-    <form action="{{ url_for('asset.index_detail') }}" method="POST">
-        <div class="row">
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="itamnum">ITAM자산번호:</label>
-                    <input type="text" class="form-control" id="itamnum" name="itamnum" value="{{ search_options.get('itamnum', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="servername">서버명:</label>
-                    <input type="text" class="form-control" id="servername" name="servername" value="{{ search_options.get('servername', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="ip">IP 주소:</label>
-                    <input type="text" class="form-control" id="ip" name="ip" value="{{ search_options.get('ip', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="hostname">호스트 이름:</label>
-                    <input type="text" class="form-control" id="hostname" name="hostname" value="{{ search_options.get('hostname', '') }}">
-                </div>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="center">센터:</label>
-                    <input type="text" class="form-control" id="center" name="center" value="{{ search_options.get('center', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="loc1">상면번호:</label>
-                    <input type="text" class="form-control" id="loc1" name="loc1" value="{{ search_options.get('loc1', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="loc2">상단번호:</label>
-                    <input type="number" class="form-control" id="loc2" name="loc2" value="{{ search_options.get('loc2', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="domain">도메인:</label>
-                    <select class="form-control" id="domain" name="domain">
-                        <option value="">모두</option>
-                        {% for option in domain_options %}
-                        <option value="{{ option.domain }}" {% if search_options.get('domain') == option.domain|string or domain_filter == option.domain %}selected{% endif %}>{{ option.state }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="group">그룹:</label>
-                    <select class="form-control" id="group" name="group">
-                        <option value="">모두</option>
-                        {% for option in group_options %}
-                        <option value="{{ option.group }}" {% if search_options.get('group') == option.group|string or group_filter == option.group %}selected{% endif %}>{{ option.state }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="charge">담당자(정):</label>
-                    <input type="text" class="form-control" id="charge" name="charge" value="{{ search_options.get('charge', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="charge2">담당자(부):</label>
-                    <input type="text" class="form-control" id="charge2" name="charge2" value="{{ search_options.get('charge2', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="charge3">현업 담당자:</label>
-                    <input type="text" class="form-control" id="charge3" name="charge3" value="{{ search_options.get('charge3', '') }}">
-                </div>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="isoper">사용여부:</label>
-                    <select class="form-control" id="isoper" name="isoper">
-                        <option value="">모두</option>
-                        <option value="0" {% if search_options.get('isoper') == '0' %}selected{% endif %}>사용</option>
-                        <option value="1" {% if search_options.get('isoper') == '1' %}selected{% endif %}>일시정지</option>
-                        <option value="2" {% if search_options.get('isoper') == '2' %}selected{% endif %}>사용안함</option>
-                    </select>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="oper">서비스구분:</label>
-                    <select class="form-control" id="oper" name="oper">
-                        <option value="">모두</option>
-                        <option value="0" {% if search_options.get('oper') == '0' %}selected{% endif %}>운영</option>
-                        <option value="1" {% if search_options.get('oper') == '1' %}selected{% endif %}>QA</option>
-                        <option value="2" {% if search_options.get('oper') == '2' %}selected{% endif %}>개발</option>
-                        <option value="4" {% if search_options.get('oper') == '4' %}selected{% endif %}>DR</option>
-                    </select>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="power">전원 이중화:</label>
-                    <select class="form-control" id="power" name="power">
-                        <option value="">모두</option>
-                        <option value="0" {% if search_options.get('power') == '0' %}selected{% endif %}>전원미사용</option>
-                        <option value="1" {% if search_options.get('power') == '1' %}selected{% endif %}>이중화</option>
-                        <option value="2" {% if search_options.get('power') == '2' %}selected{% endif %}>단일</option>
-                    </select>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="os">OS:</label>
-                    <select class="form-control" id="os" name="os">
-                        <option value="">모두</option>
-                        <option value="Linux" {% if search_options.get('os') == 'Linux' %}selected{% endif %}>Linux</option>
-                        <option value="Windows" {% if search_options.get('os') == 'Windows' %}selected{% endif %}>Windows</option>
-                        <option value="AIX" {% if search_options.get('os') == 'AIX' %}selected{% endif %}>AIX</option>
-                        <option value="HP-UX" {% if search_options.get('os') == 'HP-UX' %}selected{% endif %}>HP-UX</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="osver">OS버전:</label>
-                    <input type="text" class="form-control" id="osver" name="osver" value="{{ search_options.get('osver', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="serial">시리얼넘버:</label>
-                    <input type="text" class="form-control" id="serial" name="serial" value="{{ search_options.get('serial', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="isfix">정합성 확인:</label>
-                    <select class="form-control" id="isfix" name="isfix">
-                        <option value="0" {% if search_options.get('isfix') == '0' %}selected{% endif %}>확인 완료</option>
-                        <option value="1" {% if search_options.get('isfix') == '1' %}selected{% endif %}>확인 필요</option>
-                        <option value="" {% if search_options.get('isfix') == '' %}selected{% endif %}>모두</option>
-                    </select>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="model">모델명:</label>
-                    <input type="text" class="form-control" id="model" name="model" value="{{ search_options.get('model', '') }}">
-                </div>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="datein">설치일자:</label>
-                    <input type="date" class="form-control" id="datein" name="datein" value="{{ search_options.get('datein', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="dateout">폐기일자:</label>
-                    <input type="date" class="form-control" id="dateout" name="dateout" value="{{ search_options.get('dateout', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="eos">EOS 일자:</label>
-                    <input type="date" class="form-control" id="eos" name="eos" value="{{ search_options.get('eos', '') }}">
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="form-group">
-                    <label for="eosl">EOSL 일자:</label>
-                    <input type="date" class="form-control" id="eosl" name="eosl" value="{{ search_options.get('eosl', '') }}">
-                </div>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-md-6 text-left">
-                <a href="{{ url_for('asset.write_asset') }}" class="btn btn-success btn-sm">자산 추가</a>
-                <a href="{{ url_for('asset.export_filtered_asset') }}" class="btn btn-primary btn-sm">검색결과 내보내기</a>
-                <a href="{{ url_for('asset.export_asset') }}" class="btn btn-light btn-sm">전체 내보내기</a>
-            </div>
-            <div class="col-md-6 text-right">
-                <button type="button" class="btn btn-secondary btn-sm" data-toggle="modal" data-target="#columnSelectModal">열 선택</button>
-                <button type="submit" class="btn btn-primary btn-sm">검색</button>
-            </div>
-        </div>
-    </form>
-    <hr>
-</div>
-<!-- 열 선택 모달 -->
-<div class="modal fade" id="columnSelectModal" tabindex="-1" role="dialog" aria-labelledby="columnSelectModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="columnSelectModalLabel">표시할 열 선택</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body">
-                <form id="columnSelectForm">
-                    <div class="row">
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="domain" {% if selected_columns and 'domain' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">도메인</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="group" {% if selected_columns and 'group' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">그룹</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="servername" {% if selected_columns and 'servername' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">서버명</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="ip" {% if selected_columns and 'ip' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">IP 주소</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="hostname" {% if selected_columns and 'hostname' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">호스트명</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="os" {% if selected_columns and 'os' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">OS</label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="isoper" {% if selected_columns and 'isoper' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">운영상태</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="osver" {% if selected_columns and 'osver' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">OS버전</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="center" {% if selected_columns and 'center' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">센터</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="loc1" {% if selected_columns and 'loc1' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">상면번호</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="loc2" {% if selected_columns and 'loc2' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">상단번호</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="charge" {% if selected_columns and 'charge' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">담당(정)</label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="oper" {% if selected_columns and 'oper' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">운영구분</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="charge2" {% if selected_columns and 'charge2' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">담당(부)</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="charge3" {% if selected_columns and 'charge3' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">현업담당자</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="vcenter" {% if selected_columns and 'vcenter' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">상위자산</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="power" {% if selected_columns and 'power' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">전원이중화</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="pdu" {% if selected_columns and 'pdu' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">PDU</label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="datein" {% if selected_columns and 'datein' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">설치일자</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="dateout" {% if selected_columns and 'dateout' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">폐기일자</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="eos" {% if selected_columns and 'eos' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">EOS 일자</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="eosl" {% if selected_columns and 'eosl' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">EOSL 일자</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="model" {% if selected_columns and 'model' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">모델명</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="itamnum" {% if selected_columns and 'itamnum' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">ITAM자산번호</label>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="columns" value="serial" {% if selected_columns and 'serial' in selected_columns %}checked{% endif %}>
-                                <label class="form-check-label">시리얼넘버</label>
-                            </div>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
-                <button type="button" class="btn btn-primary" id="applyColumnSelection">적용</button>
-            </div>
-        </div>
+
+<div id="searchFields" style="display:none;">
+  <form id="searchForm" action="{{ url_for('asset.index_detail') }}" method="POST">
+    {# 열 선택값 유지 (hidden) #}
+    <div id="hiddenColumns">
+      {% for col in selected_columns %}
+        <input type="hidden" name="columns" value="{{ col }}">
+      {% endfor %}
     </div>
-</div>
 
-<!-- 자산 상세 정보 모달 -->
-<div class="modal fade" id="assetDetailModal" tabindex="-1" role="dialog" aria-labelledby="assetDetailModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="assetDetailModalLabel">자산 상세 정보</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body" id="assetDetailContent">
-                <div class="text-center">
-                    <div class="spinner-border" role="status">
-                        <span class="sr-only">로딩중...</span>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <a href="#" id="editAssetLink" class="btn btn-primary">수정</a>
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
-            </div>
-        </div>
+    {# ── 행 1: 기본 텍스트 검색 ─────────────────────────────── #}
+    <div class="row mt-2">
+      <div class="col-md-3 form-group">
+        <label>서버명</label>
+        <input type="text" class="form-control form-control-sm search-field" name="servername"
+               value="{{ search_options.get('servername','') }}">
+      </div>
+      <div class="col-md-3 form-group">
+        <label>Hostname</label>
+        <input type="text" class="form-control form-control-sm search-field" name="hostname"
+               value="{{ search_options.get('hostname','') }}">
+      </div>
+      <div class="col-md-3 form-group">
+        <label>IP 주소</label>
+        <input type="text" class="form-control form-control-sm search-field" name="ip"
+               value="{{ search_options.get('ip','') }}">
+      </div>
+      <div class="col-md-3 form-group">
+        <label>그룹</label>
+        <select class="form-control form-control-sm search-field" name="grp">
+          <option value="">모두</option>
+          {% for g in options.grp %}
+            <option value="{{ g }}" {% if search_options.get('grp') == g %}selected{% endif %}>{{ g }}</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
+
+    {# ── 행 2: 분류 드롭다운 ─────────────────────────────────── #}
+    <div class="row">
+      <div class="col-md-3 form-group">
+        <label>운영 구분</label>
+        <select class="form-control form-control-sm search-field" name="oper">
+          <option value="">모두</option>
+          {% for o in options.oper %}
+            <option value="{{ o }}" {% if search_options.get('oper') == o %}selected{% endif %}>{{ o }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 form-group">
+        <label>자산 상태</label>
+        <select class="form-control form-control-sm search-field" name="status">
+          <option value="">모두</option>
+          {% for s in options.status %}
+            <option value="{{ s }}" {% if search_options.get('status') == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 form-group">
+        <label>위치 (센터)</label>
+        <select class="form-control form-control-sm search-field" name="center">
+          <option value="">모두</option>
+          {% for c in options.center %}
+            <option value="{{ c }}" {% if search_options.get('center') == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 form-group">
+        <label>망</label>
+        <select class="form-control form-control-sm search-field" name="network_zone">
+          <option value="">모두</option>
+          {% for nz in options.network_zone %}
+            <option value="{{ nz }}" {% if search_options.get('network_zone') == nz %}selected{% endif %}>{{ nz }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    {# ── 행 3: OS / 위치 / 중요도 ────────────────────────────── #}
+    <div class="row">
+      <div class="col-md-3 form-group">
+        <label>물리/논리</label>
+        <select class="form-control form-control-sm search-field" name="asset_type">
+          <option value="">모두</option>
+          {% for at in options.asset_type %}
+            <option value="{{ at }}" {% if search_options.get('asset_type') == at %}selected{% endif %}>{{ at }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 form-group">
+        <label>OS</label>
+        <select class="form-control form-control-sm search-field" name="os">
+          <option value="">모두</option>
+          {% for o in options.os %}
+            <option value="{{ o }}" {% if search_options.get('os') == o %}selected{% endif %}>{{ o }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 form-group">
+        <label>OS 버전</label>
+        <input type="text" class="form-control form-control-sm search-field" name="osver"
+               value="{{ search_options.get('osver','') }}">
+      </div>
+      <div class="col-md-3 form-group">
+        <label>전원이중화</label>
+        <select class="form-control form-control-sm search-field" name="power">
+          <option value="">모두</option>
+          {% for pw in options.power %}
+            <option value="{{ pw }}" {% if search_options.get('power') == pw %}selected{% endif %}>{{ pw }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    {# ── 행 4: 위치 / 시리얼 / 모델 / 중요도 ──────────────────── #}
+    <div class="row">
+      <div class="col-md-3 form-group">
+        <label>상면번호 (loc1)</label>
+        <input type="text" class="form-control form-control-sm search-field" name="loc1"
+               value="{{ search_options.get('loc1','') }}">
+      </div>
+      <div class="col-md-3 form-group">
+        <label>상단번호 (loc2)</label>
+        <input type="number" class="form-control form-control-sm search-field" name="loc2"
+               value="{{ search_options.get('loc2','') }}">
+      </div>
+      <div class="col-md-3 form-group">
+        <label>시리얼번호</label>
+        <input type="text" class="form-control form-control-sm search-field" name="serial"
+               value="{{ search_options.get('serial','') }}">
+      </div>
+      <div class="col-md-3 form-group">
+        <label>모델명</label>
+        <input type="text" class="form-control form-control-sm search-field" name="model"
+               value="{{ search_options.get('model','') }}">
+      </div>
+    </div>
+
+    {# ── 행 5: 담당자 통합 / 중요도 ──────────────────────────── #}
+    <div class="row">
+      <div class="col-md-3 form-group">
+        <label>중요도</label>
+        <select class="form-control form-control-sm search-field" name="importance">
+          <option value="">모두</option>
+          {% for im in options.importance %}
+            <option value="{{ im }}" {% if search_options.get('importance') == im %}selected{% endif %}>{{ im }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-5 form-group">
+        <label>담당자 <small class="text-muted">(정·부·서비스 중 하나라도 포함)</small></label>
+        <input type="text" class="form-control form-control-sm search-field" name="charge_any"
+               placeholder="이름 입력 시 정·부·서비스담당자 통합 검색"
+               value="{{ search_options.get('charge_any','') }}">
+      </div>
+      <div class="col-md-4 form-group">
+        <label>용도</label>
+        <input type="text" class="form-control form-control-sm search-field" name="purpose"
+               value="{{ search_options.get('purpose','') }}">
+      </div>
+    </div>
+
+    {# ── 행 6~9: 날짜 기간 검색 ─────────────────────────────── #}
+    <div class="row">
+      <div class="col-md-6 form-group">
+        <label>도입일자</label>
+        <div class="input-group input-group-sm">
+          <input type="date" class="form-control form-control-sm search-field" name="datein_from"
+                 value="{{ search_options.get('datein_from','') }}">
+          <div class="input-group-prepend input-group-append">
+            <span class="input-group-text">~</span>
+          </div>
+          <input type="date" class="form-control form-control-sm search-field" name="datein_to"
+                 value="{{ search_options.get('datein_to','') }}">
+        </div>
+      </div>
+      <div class="col-md-6 form-group">
+        <label>폐기일자</label>
+        <div class="input-group input-group-sm">
+          <input type="date" class="form-control form-control-sm search-field" name="dateout_from"
+                 value="{{ search_options.get('dateout_from','') }}">
+          <div class="input-group-prepend input-group-append">
+            <span class="input-group-text">~</span>
+          </div>
+          <input type="date" class="form-control form-control-sm search-field" name="dateout_to"
+                 value="{{ search_options.get('dateout_to','') }}">
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 form-group">
+        <label>HW EOS</label>
+        <div class="input-group input-group-sm">
+          <input type="date" class="form-control form-control-sm search-field" name="hw_eos_from"
+                 value="{{ search_options.get('hw_eos_from','') }}">
+          <div class="input-group-prepend input-group-append">
+            <span class="input-group-text">~</span>
+          </div>
+          <input type="date" class="form-control form-control-sm search-field" name="hw_eos_to"
+                 value="{{ search_options.get('hw_eos_to','') }}">
+        </div>
+      </div>
+      <div class="col-md-6 form-group">
+        <label>HW EOSL</label>
+        <div class="input-group input-group-sm">
+          <input type="date" class="form-control form-control-sm search-field" name="hw_eosl_from"
+                 value="{{ search_options.get('hw_eosl_from','') }}">
+          <div class="input-group-prepend input-group-append">
+            <span class="input-group-text">~</span>
+          </div>
+          <input type="date" class="form-control form-control-sm search-field" name="hw_eosl_to"
+                 value="{{ search_options.get('hw_eosl_to','') }}">
+        </div>
+      </div>
+    </div>
+
+    {# ── 버튼 행 ────────────────────────────────────────────── #}
+    <div class="row mt-1 mb-2">
+      <div class="col-md-6 text-left">
+        <a href="{{ url_for('asset.write_asset') }}" class="btn btn-success btn-sm">자산 추가</a>
+        <a href="{{ url_for('asset.export_filtered_asset') }}" class="btn btn-primary btn-sm">검색결과 내보내기</a>
+        <button type="button" class="btn btn-light btn-sm" data-toggle="modal" data-target="#exportColModal">전체 내보내기</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-toggle="modal" data-target="#bulkModal">일괄 등록/수정</button>
+      </div>
+      <div class="col-md-6 text-right">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-toggle="modal" data-target="#columnSelectModal">열 선택</button>
+        <button type="button" class="btn btn-outline-warning btn-sm" onclick="resetSearch()">
+          <i class="fas fa-undo"></i> 초기화
+        </button>
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i class="fas fa-search"></i> 검색
+        </button>
+      </div>
+    </div>
+  </form>
+  <hr>
 </div>
 
-<div class="contents">
-    <table id="total_asset" class="display" style="width:100%">
-        <thead>
-            <tr id="table-header">
-                <!-- 헤더는 JavaScript로 동적 생성 -->
-            </tr>
-        </thead>
-        <tbody>
-            <!-- 데이터는 JavaScript로 동적 생성 -->
-        </tbody>
-    </table>
+{# ══ 열 선택 모달 ══════════════════════════════════════════════ #}
+<div class="modal fade" id="columnSelectModal" tabindex="-1" role="dialog">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">표시할 열 선택</h5>
+        <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleColAll(true)">전체 선택</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleColAll(false)">전체 해제</button>
+        </div>
+        <div class="row">
+          {% set col_defs = [
+            ('grp','그룹'), ('oper','운영구분'), ('status','자산상태'), ('servername','서버명'),
+            ('ip','IP 주소'), ('hostname','Hostname'), ('center','센터'), ('network_zone','망'),
+            ('asset_type','물리/논리'), ('purpose','용도'), ('os','OS'), ('osver','OS버전'),
+            ('loc1','상면번호'), ('loc2','상단번호'), ('usize','U사이즈'), ('maker','제조사'),
+            ('model','모델명'), ('serial','시리얼'), ('datein','도입일자'), ('dateout','폐기일자'),
+            ('hw_eos','HW EOS'), ('hw_eosl','HW EOSL'), ('importance','중요도'), ('power','전원이중화'),
+            ('charge','담당(정)'), ('charge2','담당(부)'), ('charge3','서비스담당'), ('memo','메모'),
+            ('vm_parent_servername','상위VM 서버명'), ('vm_parent_hostname','상위VM Hostname'), ('vm_parent_ip','상위VM IP')
+          ] %}
+          {% for col, label in col_defs %}
+          <div class="col-md-3">
+            <div class="form-check">
+              <input class="form-check-input col-checkbox" type="checkbox" value="{{ col }}"
+                     {% if col in selected_columns %}checked{% endif %}>
+              <label class="form-check-label">{{ label }}</label>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+        <button type="button" class="btn btn-primary" id="applyColumnSelection">적용</button>
+      </div>
+    </div>
+  </div>
 </div>
-<style>
-    .contents{
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        text-center;
-    }
-    .detail-link {
-        cursor: pointer;
-        color: #007bff;
-    }
-    .detail-link:hover {
-        text-decoration: underline;
-    }
-    #assetDetailContent table {
-        width: 100%;
-    }
-    #assetDetailContent table th {
-        width: 20%;
-        background-color: #f8f9fa;
-    }
-    .parent-asset-link {
-        color: #007bff;
-        cursor: pointer;
-        text-decoration: underline;
-    }
-    .breadcrumb {
-        background-color: #f8f9fa;
-        padding: 0.75rem 1rem;
-        margin-bottom: 1rem;
-        border-radius: 0.25rem;
-    }
-</style>
-<script>
-    $(document).ready(function() {
-        $('#toggleSearch').on('click', function() {
-            $('#searchFields').toggle(); // 상세 검색 입력 창을 표시하거나 숨깁니다.
-            var buttonText = $(this).text() === '상세 검색 열기' ? '상세 검색 닫기' : '상세 검색 열기';
-            $(this).text(buttonText); // 버튼 텍스트 변경
-        });
 
-        // 도메인 변경 시 그룹 옵션 업데이트
-        $('#domain').on('change', function() {
-            const domain = $(this).val();
-
-            if (!domain) {
-                // 도메인이 선택되지 않은 경우 그룹 옵션 초기화
-                $('#group').empty().append('<option value="">모두</option>');
-                return;
-            }
-
-            // AJAX 요청으로 해당 도메인의 그룹 옵션 가져오기
-            $.ajax({
-                url: '/get_groups',
-                method: 'GET',
-                data: { domain: domain },
-                success: function(data) {
-                    const groupSelect = $('#group');
-                    groupSelect.empty().append('<option value="">모두</option>');
-
-                    // 그룹 옵션 추가
-                    data.forEach(function(group) {
-                        groupSelect.append($('<option>', {
-                            value: group.group,
-                            text: group.state
-                        }));
-                    });
-
-                    // 그룹 변경 이벤트 트리거
-                    groupSelect.trigger('change');
-                }
-            });
-        });
-
-        // 선택된 열 정보 가져오기
-        var selectedColumns = {{ selected_columns|tojson }};
-
-        // 열 매핑 정보 가져오기
-        var columnMapping = {{ column_mapping|tojson }};
-
-        // 테이블 헤더 생성
-        var headerRow = $('#table-header');
-        headerRow.empty();
-
-        // 선택된 열에 대한 헤더 추가
-        selectedColumns.forEach(function(column) {
-            if (columnMapping[column]) {
-                headerRow.append('<th>' + columnMapping[column] + '</th>');
-            }
-        });
-
-        // 자세히 열 추가
-        headerRow.append('<th>자세히</th>');
-
-        // 데이터 테이블 초기화
-        var table = $('#total_asset').DataTable({
-            data: {{ data|tojson }},
-            columns: (function() {
-                var columns = [];
-
-                // 선택된 열에 대한 컬럼 정의 추가
-                selectedColumns.forEach(function(column) {
-                    if (column === 'domain') {
-                        columns.push({ data: 'domain_state' });
-                    } else if (column === 'isoper') {
-                        columns.push({ data: 'isoper_state' });
-                    } else if (column === 'oper') {
-                        columns.push({ data: 'oper_state' });
-                    } else if (column === 'power') {
-                        columns.push({ data: 'power_state' });
-                    } else if (column === 'os') {
-                        columns.push({ data: 'os_state' });
-                    } else if (column === 'group') {
-                        columns.push({ data: 'group_state' });
-                    } else {
-                        columns.push({ data: column });
-                    }
-                });
-
-                // 자세히 열 추가
-                columns.push({
-                    data: 'pnum',
-                    render: function(data, type, row) {
-                        return '<a href="/edit/' + data + '" class="text-decoration-none"><img src="{{ url_for("static", filename="icon/box-arrow-in-up-right.svg") }}" alt="자세히" width="16" height="16" class="align-text-bottom"></a>';
-                    }
-                });
-
-                return columns;
-            })(),
-            pageLength: 25,
-            language: {
-                url: "{{ url_for('static', filename='js/korean.json') }}"
-            }
-        });
-
-        // 체크박스 상태에 따라 열 보이기/숨기기
-        $('#applyColumnSelection').on('click', function() {
-            // 체크된 체크박스 값 가져오기
-            var selectedColumns = $('#columnSelectForm input[name="columns"]:checked').map(function() {
-                return this.value;
-            }).get();
-
-            // 현재 URL 가져오기
-            var url = new URL(window.location.href);
-
-            // 기존 columns 파라미터 제거
-            url.searchParams.delete('columns');
-
-            // 선택된 열 파라미터 추가
-            selectedColumns.forEach(function(column) {
-                url.searchParams.append('columns', column);
-            });
-
-            // 검색 옵션 유지를 위해 폼 생성 및 제출
-            var form = $('<form>').attr({
-                method: 'POST',
-                action: url.pathname
-            });
-
-            // 선택된 열 추가
-            selectedColumns.forEach(function(column) {
-                form.append($('<input>').attr({
-                    type: 'hidden',
-                    name: 'columns',
-                    value: column
-                }));
-            });
-
-            // 기존 검색 옵션 추가
-            {% for key, value in search_options.items() %}
-                form.append($('<input>').attr({
-                    type: 'hidden',
-                    name: '{{ key }}',
-                    value: '{{ value }}'
-                }));
+{# ══ 전체 내보내기 열 선택 모달 ════════════════════════════════ #}
+<div class="modal fade" id="exportColModal" tabindex="-1" role="dialog">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">내보낼 열 선택</h5>
+        <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleExportAll(true)">전체 선택</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleExportAll(false)">전체 해제</button>
+        </div>
+        <form id="exportColForm" action="{{ url_for('asset.export_asset') }}" method="POST">
+          <div class="row">
+            {% set export_cols = [
+              ('pnum','자산번호'), ('hostname','Hostname'), ('servername','서버명'),
+              ('grp','그룹'), ('oper','운영구분'), ('status','자산상태'), ('center','센터'),
+              ('network_zone','망'), ('asset_type','물리/논리'), ('purpose','용도'),
+              ('ip','IP 주소'), ('loc1','상면번호'), ('loc2','상단번호'), ('usize','U사이즈'),
+              ('maker','제조사'), ('model','모델명'), ('serial','시리얼'),
+              ('os','OS'), ('osver','OS버전'), ('cpucore','CPU코어'), ('cpusocket','CPU소켓'), ('memory','메모리(GB)'),
+              ('datein','도입일자'), ('dateout','폐기일자'), ('hw_eos','HW EOS'), ('hw_eosl','HW EOSL'),
+              ('importance','중요도'), ('power','전원이중화'), ('watt','소비전력(W)'), ('ampere','사용전류(A)'),
+              ('charge','담당(정)'), ('charge2','담당(부)'), ('charge3','서비스담당'), ('memo','메모'),
+              ('vm_parent_servername','상위VM 서버명'), ('vm_parent_hostname','상위VM Hostname'), ('vm_parent_ip','상위VM IP')
+            ] %}
+            {% for col, label in export_cols %}
+            <div class="col-md-3">
+              <div class="form-check">
+                <input class="form-check-input export-col-check" type="checkbox" name="columns" value="{{ col }}" checked>
+                <label class="form-check-label">{{ label }}</label>
+              </div>
+            </div>
             {% endfor %}
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+        <button type="button" class="btn btn-success" onclick="submitExport()">내보내기</button>
+      </div>
+    </div>
+  </div>
+</div>
 
-            // 폼을 body에 추가하고 제출
-            form.appendTo('body').submit();
-        });
+{# ══ 일괄 등록/수정 모달 ════════════════════════════════════════ #}
+<div class="modal fade" id="bulkModal" tabindex="-1" role="dialog">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">일괄 등록/수정</h5>
+        <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+      </div>
+      <div class="modal-body">
+        {# 탭 헤더 #}
+        <ul class="nav nav-tabs mb-3" id="bulkTabs" role="tablist">
+          <li class="nav-item">
+            <a class="nav-link active" data-toggle="tab" href="#bulk-asset">자산 정보</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" data-toggle="tab" href="#bulk-relation">VM 자산 관계</a>
+          </li>
+        </ul>
+
+        <div class="tab-content">
+          {# ── 탭 1: 자산 정보 ── #}
+          <div class="tab-pane fade show active" id="bulk-asset">
+            <p class="text-muted small">
+              현재 자산 데이터를 xlsx로 내려받아 수정 후 업로드하세요.<br>
+              <strong>자산번호(pnum)가 있고 DB에 존재하면 수정</strong>, 없으면 신규 등록됩니다.
+            </p>
+            <div class="mb-3">
+              <a href="{{ url_for('asset.export_bulk') }}" class="btn btn-outline-primary btn-sm">
+                <i class="fas fa-download"></i> 일괄 내려받기 (전체 자산)
+              </a>
+            </div>
+            <hr>
+            <form id="bulkUploadForm" enctype="multipart/form-data">
+              <div class="form-group">
+                <label>수정된 xlsx 업로드</label>
+                <input type="file" class="form-control-file" id="bulkFile" accept=".xlsx">
+              </div>
+              <div id="bulkUploadMsg" class="mt-2"></div>
+            </form>
+            <div class="mt-3 text-right">
+              <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+              <button type="button" class="btn btn-primary" onclick="submitBulkUpload()">업로드 / 처리</button>
+            </div>
+          </div>
+
+          {# ── 탭 2: VM 자산 관계 ── #}
+          <div class="tab-pane fade" id="bulk-relation">
+            <p class="text-muted small">
+              VM 유형 자산 관계를 일괄 등록/수정합니다.<br>
+              <strong>child_pnum(하위 자산번호)</strong>이 이미 VM 관계로 등록되어 있으면 <strong>상위 자산(parent_pnum)을 수정</strong>합니다.<br>
+              없으면 신규 등록됩니다. child_pnum당 VM 관계는 1개만 유지됩니다.
+            </p>
+            <div class="mb-3">
+              <a href="{{ url_for('asset.export_relation_template') }}" class="btn btn-outline-primary btn-sm">
+                <i class="fas fa-download"></i> 템플릿 내려받기 (기존 VM 관계 포함)
+              </a>
+            </div>
+            <hr>
+            <form id="relationUploadForm" enctype="multipart/form-data">
+              <div class="form-group">
+                <label>수정된 xlsx 업로드</label>
+                <input type="file" class="form-control-file" id="relationFile" accept=".xlsx">
+              </div>
+              <div id="relationUploadMsg" class="mt-2"></div>
+            </form>
+            <div class="mt-3 text-right">
+              <button type="button" class="btn btn-secondary" data-dismiss="modal">닫기</button>
+              <button type="button" class="btn btn-warning" onclick="submitRelationUpload()">업로드 / 처리</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ══ 데이터 테이블 ════════════════════════════════════════════ #}
+<div class="mt-3">
+  <table id="assetTable" class="display table table-sm table-bordered" style="width:100%">
+    <thead>
+      <tr id="table-header"></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<style>
+  .contents { padding-top: 2rem; padding-bottom: 2rem; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background-color: #e8f4fd; }
+</style>
+
+<script>
+/* 날짜 컬럼 목록 */
+var DATE_COLS = ['datein','dateout','hw_eos','hw_eosl'];
+
+/* 기본 열 선택 */
+var DEFAULT_COLS = ['grp','servername','ip','hostname','os','status'];
+
+$(document).ready(function() {
+
+  /* ── 검색 패널 토글 ─────────────────────────────────────── */
+  $('#toggleSearch').on('click', function() {
+    $('#searchFields').toggle();
+    $(this).text($(this).text() === '상세 검색 열기' ? '상세 검색 닫기' : '상세 검색 열기');
+  });
+
+  /* ── 열 매핑 / 데이터 ───────────────────────────────────── */
+  var columnMapping = {{ column_mapping | tojson }};
+  var selectedColumns = {{ selected_columns | tojson }};
+  var tableData = {{ data | tojson }};
+
+  /* 날짜 포맷 (YYYY-MM-DD) */
+  function fmtDate(val) {
+    if (!val) return '';
+    return String(val).substring(0, 10);
+  }
+
+  /* ── 테이블 헤더 생성 ───────────────────────────────────── */
+  var headerRow = $('#table-header');
+  headerRow.empty();
+  selectedColumns.forEach(function(col) {
+    if (col !== 'pnum' && columnMapping[col]) {
+      headerRow.append('<th>' + columnMapping[col] + '</th>');
+    }
+  });
+
+  /* ── DataTable 컬럼 정의 ────────────────────────────────── */
+  var columns = selectedColumns
+    .filter(function(col) { return col !== 'pnum'; })
+    .map(function(col) {
+      if (DATE_COLS.indexOf(col) !== -1) {
+        return {
+          data: col,
+          defaultContent: '',
+          render: function(data) { return fmtDate(data); }
+        };
+      }
+      return { data: col, defaultContent: '' };
     });
+
+  var table = $('#assetTable').DataTable({
+    data: tableData,
+    columns: columns,
+    pageLength: 25,
+    language: { url: "{{ url_for('static', filename='js/korean.json') }}" },
+    createdRow: function(row, rowData) {
+      $(row).addClass('clickable');
+      $(row).on('dblclick', function() {
+        window.location.href = '/edit/' + rowData.pnum;
+      });
+    }
+  });
+
+  /* ── 열 선택 모달 적용 ──────────────────────────────────── */
+  $('#applyColumnSelection').on('click', function() {
+    var cols = [];
+    $('.col-checkbox:checked').each(function() { cols.push(this.value); });
+
+    // 현재 검색 옵션 수집
+    var formData = new FormData(document.getElementById('searchForm'));
+
+    // hidden columns 교체
+    var hc = $('#hiddenColumns');
+    hc.empty();
+    cols.forEach(function(c) {
+      hc.append($('<input>').attr({ type: 'hidden', name: 'columns', value: c }));
+    });
+
+    $('#searchForm').submit();
+  });
+});
+
+/* ── 열 선택 전체 토글 ───────────────────────────────────── */
+function toggleColAll(check) {
+  $('.col-checkbox').prop('checked', check);
+}
+
+/* ── 검색 초기화 ──────────────────────────────────────────── */
+function resetSearch() {
+  // 모든 폼 필드 초기화
+  $('#searchForm .search-field').each(function() {
+    if (this.tagName === 'SELECT') {
+      this.selectedIndex = 0;
+    } else {
+      $(this).val('');
+    }
+  });
+
+  // 열 선택 기본값으로 복원
+  var hc = $('#hiddenColumns');
+  hc.empty();
+  DEFAULT_COLS.forEach(function(c) {
+    hc.append($('<input>').attr({ type: 'hidden', name: 'columns', value: c }));
+  });
+
+  $('#searchForm').submit();
+}
+
+/* ── 전체 내보내기 ──────────────────────────────────────── */
+function toggleExportAll(check) {
+  $('.export-col-check').prop('checked', check);
+}
+
+function submitExport() {
+  document.getElementById('exportColForm').submit();
+}
+
+/* ── 일괄 업로드 (자산 정보) ─────────────────────────────── */
+function submitBulkUpload() {
+  var fileInput = document.getElementById('bulkFile');
+  if (!fileInput.files.length) {
+    $('#bulkUploadMsg').html('<div class="alert alert-warning">파일을 선택해주세요.</div>');
+    return;
+  }
+  var formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  $('#bulkUploadMsg').html('<div class="text-muted">처리 중...</div>');
+  $.ajax({
+    url: '{{ url_for("asset.bulk_upsert_asset") }}',
+    method: 'POST',
+    data: formData,
+    processData: false,
+    contentType: false,
+    success: function(res) {
+      if (res.success) {
+        $('#bulkUploadMsg').html('<div class="alert alert-success">' + res.message + '</div>');
+        setTimeout(function() { location.reload(); }, 1500);
+      } else {
+        $('#bulkUploadMsg').html('<div class="alert alert-danger">' + res.message + '</div>');
+      }
+    },
+    error: function() {
+      $('#bulkUploadMsg').html('<div class="alert alert-danger">서버 오류가 발생했습니다.</div>');
+    }
+  });
+}
+
+/* ── 일괄 업로드 (VM 자산 관계) ─────────────────────────── */
+function submitRelationUpload() {
+  var fileInput = document.getElementById('relationFile');
+  if (!fileInput.files.length) {
+    $('#relationUploadMsg').html('<div class="alert alert-warning">파일을 선택해주세요.</div>');
+    return;
+  }
+  var formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  $('#relationUploadMsg').html('<div class="text-muted">처리 중...</div>');
+  $.ajax({
+    url: '{{ url_for("asset.bulk_upsert_relation") }}',
+    method: 'POST',
+    data: formData,
+    processData: false,
+    contentType: false,
+    success: function(res) {
+      var html = '';
+      if (res.success) {
+        html = '<div class="alert alert-success">' + res.message + '</div>';
+        if (res.row_errors && res.row_errors.length) {
+          html += '<div class="alert alert-warning mt-1"><strong>오류 행:</strong><ul class="mb-0">';
+          res.row_errors.forEach(function(e) { html += '<li>' + e + '</li>'; });
+          html += '</ul></div>';
+        }
+        $('#relationUploadMsg').html(html);
+        setTimeout(function() { location.reload(); }, 2000);
+      } else {
+        $('#relationUploadMsg').html('<div class="alert alert-danger">' + res.message + '</div>');
+      }
+    },
+    error: function() {
+      $('#relationUploadMsg').html('<div class="alert alert-danger">서버 오류가 발생했습니다.</div>');
+    }
+  });
+}
 </script>
 {% endblock %}

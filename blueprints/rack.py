@@ -233,7 +233,7 @@ def get_locations():
     floor = request.args.get('floor')
     column = request.args.get('column')
 
-    sql = "SELECT loc1 FROM total_asset WHERE loc1 LIKE %s ORDER BY LOC1 ASC"
+    sql = "SELECT loc1 FROM total_asset WHERE loc1 LIKE %s"
     data = execute_query(sql, (f"{floor}-{column}-%",))
 
     # loc1에서 위치만 추출
@@ -247,7 +247,7 @@ def get_columns():
     """컬럼 정보 가져오기"""
     floor = request.args.get('floor')
 
-    sql = "SELECT DISTINCT loc1 FROM total_asset WHERE loc1 LIKE %s ORDER BY DISTINCT loc1 ASC"
+    sql = "SELECT DISTINCT loc1 FROM total_asset WHERE loc1 LIKE %s"
     data = execute_query(sql, (f"{floor}-%",))
 
     # loc1에서 column만 추출

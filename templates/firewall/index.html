@@ -1,0 +1,525 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid pt-3 pb-5">
+
+    <!-- 헤더 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0"><i class="fas fa-shield-alt mr-2 text-primary"></i>OS 방화벽 관리</h5>
+        <div class="d-flex align-items-center">
+            <small class="text-muted mr-3" id="lastCollectedLabel"></small>
+            <button class="btn btn-sm btn-outline-secondary mr-1" onclick="openSettings()">
+                <i class="fas fa-cog"></i> 수집 설정
+            </button>
+            <button class="btn btn-sm btn-primary" id="btnCollect" onclick="startCollect()">
+                <i class="fas fa-sync-alt"></i> 데이터 수집
+            </button>
+        </div>
+    </div>
+
+    <!-- 수집 진행 바 -->
+    <div id="collectProgress" class="mb-3" style="display:none;">
+        <div class="progress" style="height:6px;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                 id="progressBar" style="width:0%"></div>
+        </div>
+        <small class="text-muted" id="progressMsg"></small>
+    </div>
+
+    <!-- 탭 -->
+    <ul class="nav nav-tabs" id="fwTabs" role="tablist">
+        <li class="nav-item">
+            <a class="nav-link active" data-toggle="tab" href="#tabCheck" role="tab">
+                <i class="fas fa-search mr-1"></i>방화벽 통과 확인
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-toggle="tab" href="#tabStatus" role="tab"
+               onclick="loadAllServers()">
+                <i class="fas fa-list mr-1"></i>방화벽 설정 현황
+            </a>
+        </li>
+    </ul>
+
+    <div class="tab-content border border-top-0 rounded-bottom p-3">
+
+        <!-- ── 탭 1: 방화벽 통과 확인 ──────────────────────────── -->
+        <div class="tab-pane fade show active" id="tabCheck" role="tabpanel">
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-row align-items-end">
+                        <div class="form-group col-md-3">
+                            <label class="font-weight-bold">출발지 IP</label>
+                            <input type="text" id="srcIp" class="form-control"
+                                   placeholder="예: 10.10.3.38">
+                        </div>
+                        <div class="form-group col-md-3 position-relative">
+                            <label class="font-weight-bold">목적지 IP (서버)</label>
+                            <input type="text" id="dstIp" class="form-control"
+                                   placeholder="예: 10.10.8.104" autocomplete="off"
+                                   oninput="suggestDst(this.value)">
+                            <div id="dstSuggestions"
+                                 class="list-group shadow-sm"
+                                 style="position:absolute;top:100%;left:0;right:0;z-index:1050;display:none;max-height:200px;overflow-y:auto;"></div>
+                        </div>
+                        <div class="form-group col-md-2">
+                            <label class="font-weight-bold">포트</label>
+                            <input type="number" id="dstPort" class="form-control"
+                                   placeholder="예: 443" min="1" max="65535">
+                        </div>
+                        <div class="form-group col-md-2">
+                            <label class="font-weight-bold">프로토콜</label>
+                            <select id="protocol" class="form-control">
+                                <option value="tcp">TCP</option>
+                                <option value="udp">UDP</option>
+                            </select>
+                        </div>
+                        <div class="form-group col-md-2">
+                            <button class="btn btn-primary btn-block" onclick="checkFirewall()">
+                                <i class="fas fa-search"></i> 확인
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 확인 결과 -->
+            <div id="checkResult" class="mt-3" style="display:none;"></div>
+        </div>
+
+        <!-- ── 탭 2: 방화벽 설정 현황 ────────────────────────────── -->
+        <div class="tab-pane fade" id="tabStatus" role="tabpanel">
+            <!-- 검색 -->
+            <div class="input-group mb-3" style="max-width:400px;">
+                <input type="text" id="serverSearch" class="form-control"
+                       placeholder="IP 또는 서버명 검색..."
+                       onkeydown="if(event.key==='Enter') searchServers()">
+                <div class="input-group-append">
+                    <button class="btn btn-outline-primary" onclick="searchServers()">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="loadAllServers()"
+                            title="전체 목록">
+                        <i class="fas fa-list"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 서버 목록 테이블 -->
+            <div class="table-responsive mb-3">
+                <table class="table table-sm table-hover table-bordered mb-0">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>서버명</th>
+                            <th>IP 주소</th>
+                            <th>가용성</th>
+                            <th>최종 수집</th>
+                            <th style="width:80px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="serverListBody">
+                        <tr><td colspan="5" class="text-center text-muted py-3">
+                            목록을 불러오려면 탭을 클릭하거나 검색하세요.
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 서버 상세 -->
+            <div id="serverDetail" style="display:none;">
+                <hr>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="mb-0" id="detailTitle"></h6>
+                    <small class="text-muted" id="detailCollectedAt"></small>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="font-weight-bold small">Hosts.allow</label>
+                        <pre id="hostsAllow"
+                             class="bg-light border rounded p-2 mb-0"
+                             style="font-size:0.78rem;max-height:120px;overflow:auto;white-space:pre-wrap;">-</pre>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="font-weight-bold small">오류 내용</label>
+                        <pre id="detailError"
+                             class="bg-light border rounded p-2 mb-0"
+                             style="font-size:0.78rem;max-height:120px;overflow:auto;white-space:pre-wrap;">-</pre>
+                    </div>
+                </div>
+
+                <label class="font-weight-bold small">Zone 현황</label>
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered table-hover">
+                        <thead class="thead-light">
+                            <tr>
+                                <th style="width:140px;">Zone 이름</th>
+                                <th>허용 출발지 IP/CIDR</th>
+                                <th style="width:220px;">허용 포트</th>
+                                <th style="width:130px;">서비스</th>
+                                <th>Rich Rules</th>
+                            </tr>
+                        </thead>
+                        <tbody id="zoneTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ══ 수집 설정 모달 ══════════════════════════════════════ -->
+<div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-cog mr-2"></i>수집 설정</h5>
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="font-weight-bold">폴스타 REST API 기본 URL</label>
+                    <input type="text" id="setBaseUrl" class="form-control"
+                           placeholder="https://hsms.hanwhalife.com/rest">
+                </div>
+                <div class="form-group">
+                    <label class="font-weight-bold">OS방화벽 모니터 Type (UUID)</label>
+                    <input type="text" id="setMonitorType" class="form-control font-monospace"
+                           style="font-size:0.82rem;">
+                    <small class="form-text text-muted">
+                        step 3 URL의 <code>type=</code> 파라미터 값. 변경 시 수정하세요.
+                    </small>
+                </div>
+                <div class="form-row">
+                    <div class="form-group col-md-6">
+                        <label class="font-weight-bold">수집 속도</label>
+                        <div class="input-group">
+                            <input type="number" id="setRateCount" class="form-control"
+                                   min="1" max="10" placeholder="1">
+                            <div class="input-group-prepend input-group-append">
+                                <span class="input-group-text">개 /</span>
+                            </div>
+                            <input type="number" id="setRateSecs" class="form-control"
+                                   min="1" placeholder="1">
+                            <div class="input-group-append">
+                                <span class="input-group-text">초  (최대 10개/초)</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group col-md-6">
+                        <label class="font-weight-bold">자동 수집 주기</label>
+                        <div class="input-group">
+                            <div class="input-group-prepend">
+                                <div class="input-group-text">
+                                    <input type="checkbox" id="setAutoEnabled">
+                                    <span class="ml-1">활성화</span>
+                                </div>
+                            </div>
+                            <input type="number" id="setAutoHours" class="form-control"
+                                   min="1" placeholder="6">
+                            <div class="input-group-append">
+                                <span class="input-group-text">시간마다</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="saveSettings()">
+                    <i class="fas fa-save mr-1"></i>저장
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── 수집 상태 폴링 ────────────────────────────────────────
+let _pollTimer = null;
+
+function startCollect() {
+    $.post('/firewall/collect')
+        .done(res => {
+            if (!res.success) { alert(res.error); return; }
+            $('#btnCollect').prop('disabled', true);
+            $('#collectProgress').show();
+            _pollTimer = setInterval(pollStatus, 1500);
+        })
+        .fail(() => alert('수집 요청 실패'));
+}
+
+function pollStatus() {
+    $.get('/firewall/collect_status', data => {
+        const bar = $('#progressBar');
+        const msg = $('#progressMsg');
+        msg.text(data.message);
+
+        if (data.total > 0) {
+            const pct = Math.round(data.progress / data.total * 100);
+            bar.css('width', pct + '%').attr('aria-valuenow', pct);
+        }
+
+        if (!data.running) {
+            clearInterval(_pollTimer);
+            _pollTimer = null;
+            $('#btnCollect').prop('disabled', false);
+            setTimeout(() => $('#collectProgress').fadeOut(), 2000);
+            if (data.last_completed) {
+                $('#lastCollectedLabel').text('최종 수집: ' + data.last_completed);
+            }
+            if (data.error) {
+                alert('수집 오류: ' + data.error);
+            }
+        }
+    });
+}
+
+// 페이지 로드 시 현재 상태 확인
+$(function () {
+    $.get('/firewall/collect_status', data => {
+        if (data.last_completed) {
+            $('#lastCollectedLabel').text('최종 수집: ' + data.last_completed);
+        }
+        if (data.running) {
+            $('#btnCollect').prop('disabled', true);
+            $('#collectProgress').show();
+            _pollTimer = setInterval(pollStatus, 1500);
+        }
+    });
+});
+
+// ── 방화벽 통과 확인 ─────────────────────────────────────
+function checkFirewall() {
+    const src  = $('#srcIp').val().trim();
+    const dst  = $('#dstIp').val().trim();
+    const port = $('#dstPort').val().trim();
+    const prot = $('#protocol').val();
+
+    if (!src || !dst || !port) {
+        alert('출발지 IP, 목적지 IP, 포트를 모두 입력하세요.');
+        return;
+    }
+
+    $.ajax({
+        url: '/firewall/check',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ src_ip: src, dst_ip: dst, dst_port: port, protocol: prot }),
+        success: renderCheckResult,
+        error: (xhr) => {
+            const msg = xhr.responseJSON ? xhr.responseJSON.error : xhr.responseText;
+            alert('오류: ' + msg);
+        }
+    });
+}
+
+function renderCheckResult(data) {
+    const el = $('#checkResult');
+    let html = '';
+
+    if (data.result === 'ALLOWED') {
+        html = `<div class="alert alert-success">
+            <i class="fas fa-check-circle fa-lg mr-2"></i>
+            <strong>ALLOWED</strong> — ${data.server.name} (${data.server.ip}) 로의 통신이 허용됩니다.
+        </div>`;
+        html += `<p class="font-weight-bold mt-2">매칭된 규칙 (${data.matched.length}건)</p>
+                 <table class="table table-sm table-bordered">
+                 <thead class="thead-light"><tr><th>유형</th><th>Zone</th><th>세부 정보</th></tr></thead><tbody>`;
+        for (const m of data.matched) {
+            if (m.type === 'zone') {
+                html += `<tr>
+                    <td><span class="badge badge-info">Zone 규칙</span></td>
+                    <td>${esc(m.zone)}</td>
+                    <td><small>Sources: ${esc(m.sources)}<br>Ports: ${esc(m.ports)}</small></td>
+                </tr>`;
+            } else {
+                html += `<tr>
+                    <td><span class="badge badge-warning">Rich Rule</span></td>
+                    <td>${esc(m.zone)}</td>
+                    <td><code style="font-size:0.78rem;">${esc(m.rule)}</code></td>
+                </tr>`;
+            }
+        }
+        html += '</tbody></table>';
+
+    } else if (data.result === 'BLOCKED') {
+        html = `<div class="alert alert-danger">
+            <i class="fas fa-ban fa-lg mr-2"></i>
+            <strong>BLOCKED</strong> — ${data.server.name} (${data.server.ip}) 의 방화벽에서 차단됩니다.
+            <br><small class="text-muted">검사한 Zone 수: ${data.zones_checked}개</small>
+        </div>`;
+
+    } else {
+        html = `<div class="alert alert-warning">
+            <i class="fas fa-question-circle fa-lg mr-2"></i>
+            <strong>UNKNOWN</strong> — ${data.reason || '알 수 없음'}
+        </div>`;
+    }
+
+    if (data.server) {
+        const avail = data.server.availability;
+        const badge = avail === 'UP'
+            ? '<span class="badge badge-success">UP</span>'
+            : avail === 'DOWN'
+                ? '<span class="badge badge-danger">DOWN</span>'
+                : '<span class="badge badge-secondary">-</span>';
+        html += `<p class="text-muted small mb-0">
+            서버 가용성: ${badge} &nbsp;|&nbsp; 최종 수집: ${data.server.last_collected || '-'}
+        </p>`;
+    }
+
+    el.html(html).show();
+}
+
+// ── 목적지 IP 자동완성 ─────────────────────────────────────
+let _suggestTimer = null;
+function suggestDst(val) {
+    clearTimeout(_suggestTimer);
+    if (val.length < 3) { $('#dstSuggestions').hide(); return; }
+    _suggestTimer = setTimeout(() => {
+        $.get('/firewall/search_servers', { q: val }, items => {
+            const box = $('#dstSuggestions');
+            if (!items.length) { box.hide(); return; }
+            box.html(items.map(s =>
+                `<a class="list-group-item list-group-item-action py-1 px-2"
+                    style="font-size:0.85rem;"
+                    onclick="selectDst('${s.ip_address}','${s.name}')">
+                    <strong>${esc(s.ip_address)}</strong> — ${esc(s.name)}
+                    <span class="badge badge-${s.availability==='UP'?'success':'danger'} float-right">${s.availability||'-'}</span>
+                 </a>`
+            ).join('')).show();
+        });
+    }, 250);
+}
+
+function selectDst(ip, name) {
+    $('#dstIp').val(ip);
+    $('#dstSuggestions').hide();
+}
+
+$(document).click(e => {
+    if (!$(e.target).closest('#dstIp, #dstSuggestions').length) {
+        $('#dstSuggestions').hide();
+    }
+});
+
+// ── 탭 2: 서버 목록 ──────────────────────────────────────
+let _allLoaded = false;
+function loadAllServers() {
+    if (_allLoaded) return;
+    $.get('/firewall/servers', renderServerList);
+    _allLoaded = true;
+}
+
+function searchServers() {
+    const kw = $('#serverSearch').val().trim();
+    if (!kw) { loadAllServers(); return; }
+    $.get('/firewall/search_servers', { q: kw }, renderServerList);
+}
+
+function renderServerList(servers) {
+    const tbody = $('#serverListBody');
+    if (!servers.length) {
+        tbody.html('<tr><td colspan="5" class="text-center text-muted">검색 결과가 없습니다.</td></tr>');
+        return;
+    }
+    tbody.html(servers.map(s => `
+        <tr>
+            <td>${esc(s.name)}</td>
+            <td>${esc(s.ip_address || '-')}</td>
+            <td>${availBadge(s.availability)}</td>
+            <td><small>${s.last_collected || '-'}</small></td>
+            <td><button class="btn btn-xs btn-outline-primary"
+                onclick="loadServerDetail(${s.resource_id})">상세</button></td>
+        </tr>`).join(''));
+}
+
+function availBadge(av) {
+    if (av === 'UP')   return '<span class="badge badge-success">UP</span>';
+    if (av === 'DOWN') return '<span class="badge badge-danger">DOWN</span>';
+    return '<span class="badge badge-secondary">-</span>';
+}
+
+function loadServerDetail(resourceId) {
+    $.get('/firewall/server/' + resourceId, data => {
+        $('#detailTitle').html(
+            `<i class="fas fa-server mr-1"></i>${esc(data.name)}
+             <span class="ml-2 small font-weight-normal text-muted">${esc(data.ip_address||'')}</span>
+             <span class="ml-1">${availBadge(data.availability)}</span>`
+        );
+        $('#detailCollectedAt').text(data.last_collected ? '수집: ' + data.last_collected : '');
+        $('#hostsAllow').text(data.hosts_allow || '(없음)');
+        $('#detailError').text(data.error_msg || '(없음)');
+
+        const zones = data.zones || [];
+        if (!zones.length) {
+            $('#zoneTableBody').html(
+                '<tr><td colspan="5" class="text-center text-muted">Zone 데이터가 없습니다.</td></tr>');
+        } else {
+            $('#zoneTableBody').html(zones.map(z => `
+                <tr>
+                    <td><strong>${esc(z.zone_name || '-')}</strong></td>
+                    <td><small style="white-space:pre-wrap;">${esc(z.sources||'').replace(/ /g,'\n')}</small></td>
+                    <td><small>${esc(z.ports||'').replace(/ /g,' &nbsp;')}</small></td>
+                    <td><small>${esc(z.services||'-')}</small></td>
+                    <td>
+                        ${z.rich_rules
+                            ? `<pre style="font-size:0.72rem;max-height:100px;overflow:auto;margin:0;white-space:pre-wrap;">${esc(z.rich_rules)}</pre>`
+                            : '<span class="text-muted">-</span>'}
+                    </td>
+                </tr>`).join(''));
+        }
+        $('#serverDetail').show();
+        $('#serverDetail')[0].scrollIntoView({ behavior: 'smooth' });
+    }).fail(() => alert('서버 상세 정보를 불러오지 못했습니다.'));
+}
+
+// ── 수집 설정 모달 ────────────────────────────────────────
+function openSettings() {
+    $.get('/firewall/settings', cfg => {
+        $('#setBaseUrl').val(cfg.polaris_base_url || '');
+        $('#setMonitorType').val(cfg.fw_monitor_type || '');
+        $('#setRateCount').val(cfg.rate_limit_count || 1);
+        $('#setRateSecs').val(cfg.rate_limit_seconds || 1);
+        $('#setAutoEnabled').prop('checked', !!cfg.auto_collect_enabled);
+        $('#setAutoHours').val(cfg.auto_collect_interval_hours || 6);
+        $('#settingsModal').modal('show');
+    });
+}
+
+function saveSettings() {
+    const payload = {
+        polaris_base_url:            $('#setBaseUrl').val().trim(),
+        fw_monitor_type:             $('#setMonitorType').val().trim(),
+        rate_limit_count:            parseInt($('#setRateCount').val()) || 1,
+        rate_limit_seconds:          parseInt($('#setRateSecs').val()) || 1,
+        auto_collect_enabled:        $('#setAutoEnabled').is(':checked') ? 1 : 0,
+        auto_collect_interval_hours: parseInt($('#setAutoHours').val()) || 6,
+    };
+    $.ajax({
+        url: '/firewall/settings',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(payload),
+        success: res => {
+            if (res.success) {
+                $('#settingsModal').modal('hide');
+            } else {
+                alert('저장 실패: ' + res.error);
+            }
+        },
+        error: () => alert('설정 저장 중 오류가 발생했습니다.')
+    });
+}
+
+// ── 공통 유틸 ─────────────────────────────────────────────
+function esc(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;');
+}
+</script>
+{% endblock %}

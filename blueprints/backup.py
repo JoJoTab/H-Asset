@@ -5,8 +5,414 @@ import pandas as pd
 import io
 from decimal import Decimal
 import json
+import os
+import shutil
+import threading
+import re
+import schedule as schedule_lib
+
 
 backup_bp = Blueprint('backup', __name__, url_prefix='/backup')
+
+AUTO_BACKUP_HISTORY_FOLDER = os.getenv('AUTO_BACKUP_HISTORY_FOLDER', os.path.join('autodata', 'backup', 'history'))
+_backup_history_schema_checked = False
+_backup_history_scheduler_started = False
+
+
+def ensure_backup_history_schema():
+    """백업 이력 CSV 수집용 컬럼이 없으면 자동 추가"""
+    global _backup_history_schema_checked
+    if _backup_history_schema_checked:
+        return
+
+    columns_to_add = [
+        ("client_name", "VARCHAR(200) DEFAULT NULL"),
+        ("job_duration", "VARCHAR(50) DEFAULT NULL"),
+        ("job_file_count", "INT DEFAULT NULL"),
+        ("job_primary_id", "VARCHAR(128) DEFAULT NULL"),
+        ("schedule_level_type", "VARCHAR(100) DEFAULT NULL"),
+        ("master_server", "VARCHAR(200) DEFAULT NULL"),
+        ("media_server", "VARCHAR(200) DEFAULT NULL"),
+        ("code_status", "INT DEFAULT 0"),
+        ("job_status_text", "VARCHAR(100) DEFAULT NULL"),
+        ("source_file", "VARCHAR(255) DEFAULT NULL"),
+        ("ingested_at", "TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP"),
+    ]
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'backup_history'
+            """)
+            existing_columns = {row['COLUMN_NAME'] for row in cursor.fetchall()}
+
+            for col_name, col_def in columns_to_add:
+                if col_name not in existing_columns:
+                    cursor.execute(f"ALTER TABLE backup_history ADD COLUMN {col_name} {col_def}")
+
+            try:
+                if 'job_primary_id' not in existing_columns:
+                    cursor.execute("CREATE INDEX idx_backup_history_job_primary_id ON backup_history(job_primary_id)")
+            except Exception:
+                pass
+
+            connection.commit()
+            _backup_history_schema_checked = True
+    finally:
+        connection.close()
+
+
+def _safe_float(value, default=0.0):
+    if value is None:
+        return default
+    if isinstance(value, str):
+        value = value.strip().replace(',', '')
+        if value == '':
+            return default
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _safe_int(value, default=0):
+    if value is None:
+        return default
+    if isinstance(value, str):
+        value = value.strip().replace(',', '')
+        if value == '':
+            return default
+    try:
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def _safe_datetime(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        parsed = pd.to_datetime(value, errors='coerce')
+        if pd.isna(parsed):
+            return None
+        if hasattr(parsed, 'to_pydatetime'):
+            return parsed.to_pydatetime()
+        return parsed
+    except Exception:
+        return None
+
+
+def _normalize_columns(df):
+    df.columns = [str(col).strip() for col in df.columns]
+    return df
+
+
+def _read_backup_history_csv(file_path):
+    encodings = ['utf-8-sig', 'cp949', 'euc-kr', 'utf-8']
+    last_error = None
+    for enc in encodings:
+        try:
+            df = pd.read_csv(file_path, encoding=enc)
+            return _normalize_columns(df)
+        except Exception as e:
+            last_error = e
+            continue
+    raise last_error
+
+
+def _upsert_backup_history_row(cursor, row_data):
+    check_sql = """
+    SELECT id FROM backup_history
+    WHERE job_primary_id = %s AND job_start_time = %s
+    LIMIT 1
+    """
+    update_sql = """
+    UPDATE backup_history SET
+        schedule_id = %s,
+        client_name = %s,
+        job_duration = %s,
+        job_file_count = %s,
+        schedule_level_type = %s,
+        master_server = %s,
+        media_server = %s,
+        policy_name = %s,
+        backup_type = %s,
+        schedule_name = %s,
+        data_size_gb = %s,
+        job_start_time = %s,
+        job_end_time = %s,
+        actual_size_gb = %s,
+        deduplication_rate = %s,
+        job_status = %s,
+        code_status = %s,
+        job_status_text = %s,
+        source_file = %s,
+        ingested_at = NOW()
+    WHERE id = %s
+    """
+    insert_sql = """
+    INSERT INTO backup_history (
+        schedule_id, client_name, job_duration, job_file_count, job_primary_id,
+        schedule_level_type, master_server, media_server, policy_name, backup_type,
+        schedule_name, data_size_gb, job_start_time, job_end_time, actual_size_gb,
+        deduplication_rate, job_status, code_status, job_status_text, source_file
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
+    job_primary_id = row_data.get('job_primary_id')
+    job_start_time = row_data.get('job_start_time')
+    if job_primary_id and job_start_time:
+        cursor.execute(check_sql, (job_primary_id, job_start_time))
+        existing = cursor.fetchone()
+    else:
+        existing = None
+
+    if existing:
+        cursor.execute(update_sql, (
+            row_data.get('schedule_id'),
+            row_data.get('client_name'),
+            row_data.get('job_duration'),
+            row_data.get('job_file_count'),
+            row_data.get('schedule_level_type'),
+            row_data.get('master_server'),
+            row_data.get('media_server'),
+            row_data.get('policy_name'),
+            row_data.get('backup_type'),
+            row_data.get('schedule_name'),
+            row_data.get('data_size_gb'),
+            row_data.get('job_start_time'),
+            row_data.get('job_end_time'),
+            row_data.get('actual_size_gb'),
+            row_data.get('deduplication_rate'),
+            row_data.get('job_status'),
+            row_data.get('code_status'),
+            row_data.get('job_status_text'),
+            row_data.get('source_file'),
+            existing['id']
+        ))
+        return 'updated'
+
+    cursor.execute(insert_sql, (
+        row_data.get('schedule_id'),
+        row_data.get('client_name'),
+        row_data.get('job_duration'),
+        row_data.get('job_file_count'),
+        row_data.get('job_primary_id'),
+        row_data.get('schedule_level_type'),
+        row_data.get('master_server'),
+        row_data.get('media_server'),
+        row_data.get('policy_name'),
+        row_data.get('backup_type'),
+        row_data.get('schedule_name'),
+        row_data.get('data_size_gb'),
+        row_data.get('job_start_time'),
+        row_data.get('job_end_time'),
+        row_data.get('actual_size_gb'),
+        row_data.get('deduplication_rate'),
+        row_data.get('job_status'),
+        row_data.get('code_status'),
+        row_data.get('job_status_text'),
+        row_data.get('source_file')
+    ))
+    return 'inserted'
+
+
+def _map_new_csv_row(row, source_file):
+    data_size_gb = _safe_float(row.get('Protected Data Size(GB)'))
+    actual_size_gb = _safe_float(row.get('Post Deduplication Size(GB)'))
+    deduplication_rate = _safe_float(row.get('Total Optimization % (Accelerator + Deduplication)'))
+
+    if actual_size_gb == 0 and data_size_gb > 0 and deduplication_rate > 0:
+        actual_size_gb = data_size_gb * (100 - deduplication_rate) / 100
+
+    code_status = _safe_int(row.get('Code Status'))
+
+    return {
+        'schedule_id': None,
+        'client_name': row.get('Client Name'),
+        'job_duration': row.get('Job Duration'),
+        'job_file_count': _safe_int(row.get('Job File Count'), None),
+        'job_primary_id': str(row.get('Job Primary ID')).strip() if pd.notna(row.get('Job Primary ID')) else None,
+        'schedule_level_type': row.get('Schedule/Level Type'),
+        'master_server': row.get('Master Server'),
+        'media_server': row.get('Media Server'),
+        'policy_name': row.get('Policy Name'),
+        'backup_type': row.get('Job Type') or 'Backup',
+        'schedule_name': row.get('Schedule Name'),
+        'data_size_gb': data_size_gb,
+        'job_start_time': _safe_datetime(row.get('Job Start Time')),
+        'job_end_time': _safe_datetime(row.get('Job End Time')),
+        'actual_size_gb': actual_size_gb,
+        'deduplication_rate': deduplication_rate,
+        'job_status': code_status,
+        'code_status': code_status,
+        'job_status_text': row.get('Job Status'),
+        'source_file': source_file
+    }
+
+
+def _map_legacy_excel_row(row, source_file):
+    status_code = _safe_int(row.get('상태'))
+    data_size_gb = _safe_float(row.get('용량(GB)'))
+    deduplication_rate = _safe_float(row.get('중복제거률(%)'))
+    actual_size_gb = data_size_gb * (100 - deduplication_rate) / 100
+
+    return {
+        'schedule_id': None,
+        'client_name': None,
+        'job_duration': None,
+        'job_file_count': None,
+        'job_primary_id': None,
+        'schedule_level_type': None,
+        'master_server': None,
+        'media_server': None,
+        'policy_name': row.get('정책명'),
+        'backup_type': row.get('Type') if pd.notna(row.get('Type')) else 'Backup',
+        'schedule_name': row.get('스케줄명'),
+        'data_size_gb': data_size_gb,
+        'job_start_time': _safe_datetime(row.get('시작시간')),
+        'job_end_time': _safe_datetime(row.get('종료시간')),
+        'actual_size_gb': actual_size_gb,
+        'deduplication_rate': deduplication_rate,
+        'job_status': status_code,
+        'code_status': status_code,
+        'job_status_text': None,
+        'source_file': source_file
+    }
+
+
+REQUIRED_NEW_COLUMNS = [
+    'Client Name', 'Job Duration', 'Job File Count', 'Job Primary ID',
+    'Schedule/Level Type', 'Master Server', 'Media Server', 'Policy Name', 'Job Type',
+    'Schedule Name', 'Protected Data Size(GB)', 'Job Start Time', 'Job End Time',
+    'Post Deduplication Size(GB)', 'Total Optimization % (Accelerator + Deduplication)',
+    'Job Status', 'Code Status'
+]
+REQUIRED_LEGACY_COLUMNS = ['시작시간', '종료시간', '정책명', '스케줄명', '상태', '용량(GB)', 'Type']
+
+
+def import_backup_history_dataframe(df, source_file='manual-upload'):
+    ensure_backup_history_schema()
+    df = _normalize_columns(df)
+
+    is_new_format = all(col in df.columns for col in REQUIRED_NEW_COLUMNS)
+    is_legacy_format = all(col in df.columns for col in REQUIRED_LEGACY_COLUMNS)
+
+    if not is_new_format and not is_legacy_format:
+        missing_new = [c for c in REQUIRED_NEW_COLUMNS if c not in df.columns]
+        missing_legacy = [c for c in REQUIRED_LEGACY_COLUMNS if c not in df.columns]
+        detail = f'신규 형식 누락 컬럼: {missing_new}' if len(missing_new) <= len(missing_legacy) else f'레거시 형식 누락 컬럼: {missing_legacy}'
+        return {'inserted': 0, 'updated': 0, 'failed': len(df), 'error': f'지원하지 않는 이력 파일 형식입니다. ({detail})'}
+
+    inserted = 0
+    updated = 0
+    failed = 0
+    row_errors = []
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            for idx, row in df.iterrows():
+                row_num = idx + 1
+                try:
+                    row_data = _map_new_csv_row(row, source_file) if is_new_format else _map_legacy_excel_row(row, source_file)
+
+                    if not row_data.get('policy_name') or not row_data.get('schedule_name'):
+                        failed += 1
+                        row_errors.append(f'행 {row_num}: Policy Name 또는 Schedule Name 누락 (policy={row_data.get("policy_name")!r}, schedule={row_data.get("schedule_name")!r})')
+                        continue
+
+                    action = _upsert_backup_history_row(cursor, row_data)
+                    if action == 'updated':
+                        updated += 1
+                    else:
+                        inserted += 1
+                except Exception as e:
+                    failed += 1
+                    row_errors.append(f'행 {row_num}: {str(e)}')
+                    continue
+        connection.commit()
+    finally:
+        connection.close()
+
+    return {'inserted': inserted, 'updated': updated, 'failed': failed, 'error': None, 'row_errors': row_errors}
+
+
+def import_backup_history_csv_file(file_path):
+    df = _read_backup_history_csv(file_path)
+    return import_backup_history_dataframe(df, source_file=os.path.basename(file_path))
+
+
+def collect_backup_history_from_folder():
+    ensure_backup_history_schema()
+    os.makedirs(AUTO_BACKUP_HISTORY_FOLDER, exist_ok=True)
+    processed_dir = os.path.join(AUTO_BACKUP_HISTORY_FOLDER, 'processed')
+    error_dir = os.path.join(AUTO_BACKUP_HISTORY_FOLDER, 'error')
+    os.makedirs(processed_dir, exist_ok=True)
+    os.makedirs(error_dir, exist_ok=True)
+
+    total_inserted = 0
+    total_updated = 0
+    total_failed = 0
+    processed_files = 0
+
+    for filename in sorted(os.listdir(AUTO_BACKUP_HISTORY_FOLDER)):
+        if not filename.lower().endswith('.csv'):
+            continue
+
+        source_path = os.path.join(AUTO_BACKUP_HISTORY_FOLDER, filename)
+        if not os.path.isfile(source_path):
+            continue
+
+        try:
+            result = import_backup_history_csv_file(source_path)
+            total_inserted += result['inserted']
+            total_updated += result['updated']
+            total_failed += result['failed']
+            processed_files += 1
+
+            target_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+            shutil.move(source_path, os.path.join(processed_dir, target_name))
+        except Exception:
+            target_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+            shutil.move(source_path, os.path.join(error_dir, target_name))
+
+    return {
+        'processed_files': processed_files,
+        'inserted': total_inserted,
+        'updated': total_updated,
+        'failed': total_failed
+    }
+
+
+def _run_backup_history_scheduler():
+    while True:
+        schedule_lib.run_pending()
+        import time as _time
+        _time.sleep(1)
+
+
+def setup_auto_backup_history():
+    """백업 이력 CSV 자동 수집(매일 09:00)"""
+    global _backup_history_scheduler_started
+    if _backup_history_scheduler_started:
+        return
+
+    ensure_backup_history_schema()
+    os.makedirs(AUTO_BACKUP_HISTORY_FOLDER, exist_ok=True)
+
+    schedule_lib.every().day.at('09:00').do(collect_backup_history_from_folder)
+    thread = threading.Thread(target=_run_backup_history_scheduler, daemon=True)
+    thread.start()
+    _backup_history_scheduler_started = True
+
+    collect_backup_history_from_folder()
 
 
 def format_time(time_value):
@@ -25,20 +431,16 @@ def format_time(time_value):
 
 def get_status_display(status_code):
     """상태 코드를 표시용 텍스트로 변환"""
-    if status_code in [0, 112]:
+    if status_code == 0:
         return 'Success'
-    elif status_code == 1:
-        return 'Partial Success'
     else:
         return 'Failed'
 
 
 def get_status_class(status_code):
     """상태 코드에 따른 CSS 클래스 반환"""
-    if status_code in [0, 112]:
+    if status_code == 0:
         return 'success'
-    elif status_code == 1:
-        return 'warning'
     else:
         return 'danger'
 
@@ -118,6 +520,8 @@ def parse_schedule_times_input(time_input):
 def index():
     """백업 관리 메인 페이지"""
     try:
+        ensure_backup_history_schema()
+
         # 날짜 계산
         current_date = datetime.now().date()
 
@@ -139,7 +543,7 @@ def index():
         # 백업 현황 조회 (24시간 전후)
         current_time = datetime.now()
         past_backups = get_backup_status(current_time - timedelta(hours=24), current_time, 'past')
-        future_backups = get_backup_status(current_time, current_time + timedelta(hours=24), 'future')
+        future_backups = get_missed_schedules(current_time - timedelta(hours=24), current_time)
 
         # 백업 이력 조회 (기본 7일)
         backup_history = get_backup_history(start_date, end_date)
@@ -174,17 +578,12 @@ def index():
 def schedule():
     """스케줄 관리 페이지"""
     try:
-        # 전체 스케줄 조회
+        ensure_backup_history_schema()
         schedules = get_all_schedules()
 
-        # 각 스케줄의 백업 시간 및 연계 자산 정보 조회
         for sch in schedules:
-            # 백업 시간 조회
-            sch['schedule_times'] = get_schedule_times(sch['id'])
-            sch['schedule_times_display'] = format_schedule_times(sch['schedule_times'])
-
-            # 연계된 자산 정보 조회
-            sch['linked_asset'] = get_linked_asset_info(sch['id'])
+            if not sch.get('schedule_times_display'):
+                sch['schedule_times_display'] = '-'
 
         # 컬럼 정보 조회
         columns = get_schedule_columns()
@@ -302,12 +701,13 @@ def get_backup_status(start_time, end_time, status_type):
             bh.job_end_time,
             bh.policy_name,
             bh.schedule_name,
-            bh.job_status,
+            COALESCE(bh.code_status, bh.job_status) AS job_status,
             bh.actual_size_gb,
             bs.hostname
         FROM backup_history bh
         LEFT JOIN backup_schedule bs ON (bh.policy_name = bs.backup_policy AND bh.schedule_name = bs.backup_schedule)
         WHERE bh.job_start_time BETWEEN %s AND %s
+          AND COALESCE(bh.code_status, bh.job_status) <> 0
         ORDER BY bh.job_start_time DESC
         """
     else:  # future
@@ -354,7 +754,16 @@ def get_backup_history(start_date, end_date):
         bh.job_end_time,
         bh.policy_name,
         bh.schedule_name,
-        bh.job_status,
+        COALESCE(bh.code_status, bh.job_status) AS job_status,
+        bh.code_status,
+        bh.client_name,
+        bh.job_duration,
+        bh.job_file_count,
+        bh.job_primary_id,
+        bh.schedule_level_type,
+        bh.master_server,
+        bh.media_server,
+        bh.job_status_text,
         bh.backup_type,
         bh.data_size_gb,
         bh.deduplication_rate,
@@ -375,6 +784,119 @@ def get_backup_history(start_date, end_date):
         connection.close()
 
 
+def _iter_dates(start_dt, end_dt):
+    current = start_dt.date()
+    end_date = end_dt.date()
+    while current <= end_date:
+        yield current
+        current += timedelta(days=1)
+
+
+def _is_expected_on_date(day_of_week, date_obj):
+    if day_of_week in ('DAILY', 'HOURLY'):
+        return True
+
+    weekday_map = {
+        0: 'MON',
+        1: 'TUE',
+        2: 'WED',
+        3: 'THU',
+        4: 'FRI',
+        5: 'SAT',
+        6: 'SUN'
+    }
+    return weekday_map.get(date_obj.weekday()) == day_of_week
+
+
+def get_missed_schedules(start_time, end_time):
+    """스케줄은 있으나 실행 이력이 없는 정책+스케줄 탐지"""
+    sql_schedule = """
+    SELECT
+        bs.id,
+        bs.hostname,
+        bs.backup_policy,
+        bs.backup_schedule,
+        bst.day_of_week,
+        bst.backup_time
+    FROM backup_schedule bs
+    JOIN backup_schedule_times bst ON bs.id = bst.schedule_id
+    WHERE bs.is_active = TRUE
+      AND bs.backup_policy IS NOT NULL
+      AND bs.backup_schedule IS NOT NULL
+    """
+    sql_history = """
+    SELECT DISTINCT
+        policy_name,
+        schedule_name,
+        DATE(job_start_time) AS run_date
+    FROM backup_history
+    WHERE job_start_time BETWEEN %s AND %s
+      AND policy_name IS NOT NULL
+      AND schedule_name IS NOT NULL
+    """
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(sql_schedule)
+            schedules = cursor.fetchall()
+
+            cursor.execute(sql_history, (start_time, end_time))
+            histories = cursor.fetchall()
+    finally:
+        connection.close()
+
+    history_keys = {
+        (
+            row['policy_name'],
+            row['schedule_name'],
+            row['run_date']
+        )
+        for row in histories
+    }
+
+    missed = []
+    seen = set()
+
+    for sch in schedules:
+        day_of_week = sch.get('day_of_week')
+        if not day_of_week:
+            continue
+
+        for run_date in _iter_dates(start_time, end_time):
+            if not _is_expected_on_date(day_of_week, run_date):
+                continue
+
+            key = (sch['backup_policy'], sch['backup_schedule'], run_date)
+            if key in history_keys:
+                continue
+            if key in seen:
+                continue
+
+            seen.add(key)
+            backup_time = sch.get('backup_time')
+            expected_start = None
+            if isinstance(backup_time, timedelta):
+                expected_start = datetime.combine(run_date, datetime.min.time()) + backup_time
+            elif isinstance(backup_time, time):
+                expected_start = datetime.combine(run_date, backup_time)
+            else:
+                expected_start = datetime.combine(run_date, datetime.min.time())
+
+            missed.append({
+                'id': sch['id'],
+                'hostname': sch.get('hostname'),
+                'policy_name': sch['backup_policy'],
+                'schedule_name': sch['backup_schedule'],
+                'job_start_time': expected_start,
+                'job_end_time': None,
+                'job_status': 1
+            })
+
+    missed.sort(key=lambda row: row['job_start_time'] or datetime.min, reverse=True)
+    return missed
+
+
 def get_all_schedules():
     """전체 스케줄 조회"""
     sql = """
@@ -384,9 +906,36 @@ def get_all_schedules():
         installation_location, redundancy_config, backup_method,
         retention_period, offsite_cycle, offsite_location, offsite_equipment,
         offsite_retention, backup_target, storage_media, backup_policy,
-        backup_schedule, dbms, target_filesystem, memo, is_active, 
-        created_at, updated_at
-    FROM backup_schedule
+        backup_schedule, dbms, target_filesystem, memo, is_active,
+        created_at, updated_at,
+        COALESCE(st.schedule_times_display, '-') AS schedule_times_display
+    FROM backup_schedule bs
+    LEFT JOIN (
+        SELECT
+            schedule_id,
+            GROUP_CONCAT(
+                CONCAT(
+                    CASE day_of_week
+                        WHEN 'DAILY' THEN '매일'
+                        WHEN 'HOURLY' THEN '매시간'
+                        WHEN 'MON' THEN '월요일'
+                        WHEN 'TUE' THEN '화요일'
+                        WHEN 'WED' THEN '수요일'
+                        WHEN 'THU' THEN '목요일'
+                        WHEN 'FRI' THEN '금요일'
+                        WHEN 'SAT' THEN '토요일'
+                        WHEN 'SUN' THEN '일요일'
+                        WHEN 'SPECIFIC' THEN '지정'
+                        ELSE day_of_week
+                    END,
+                    ' ',
+                    DATE_FORMAT(backup_time, '%H:%i')
+                )
+                ORDER BY id SEPARATOR ' | '
+            ) AS schedule_times_display
+        FROM backup_schedule_times
+        GROUP BY schedule_id
+    ) st ON bs.id = st.schedule_id
     ORDER BY hostname, backup_policy
     """
 
@@ -831,6 +1380,79 @@ def api_backup_history():
         return jsonify({'error': str(e)}), 500
 
 
+@backup_bp.route('/api/backup-history/collect', methods=['POST'])
+def api_collect_backup_history():
+    """지정 폴더의 CSV를 즉시 수집"""
+    try:
+        result = collect_backup_history_from_folder()
+        return jsonify({
+            'success': True,
+            'message': f"수집 완료: 파일 {result['processed_files']}개, 신규 {result['inserted']}건, 갱신 {result['updated']}건, 실패 {result['failed']}건"
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@backup_bp.route('/api/auto-map-schedule-assets', methods=['POST'])
+def api_auto_map_schedule_assets():
+    """backup_schedule의 IP + Hostname 기준으로 total_asset 자동 맵핑.
+    이미 연계된 스케줄도 매칭 결과가 다르면 갱신한다."""
+    try:
+        matches = execute_query("""
+            SELECT bs.id   AS schedule_id,
+                   ta.pnum AS asset_pnum
+            FROM backup_schedule bs
+            JOIN total_asset ta
+              ON bs.hostname   = ta.hostname
+             AND bs.ip_address = ta.ip
+            WHERE bs.hostname   IS NOT NULL AND bs.hostname   NOT IN ('', 'None')
+              AND bs.ip_address IS NOT NULL AND bs.ip_address NOT IN ('', 'None', '0.0.0.0')
+        """) or []
+
+        if not matches:
+            return jsonify({'success': True,
+                            'message': '매칭된 스케줄이 없습니다.',
+                            'mapped': 0, 'updated': 0})
+
+        mapped = updated = 0
+        connection = get_db_connection()
+        try:
+            with connection.cursor() as cursor:
+                for m in matches:
+                    cursor.execute(
+                        "SELECT id FROM backup_schedule_asset_link WHERE schedule_id = %s",
+                        (m['schedule_id'],)
+                    )
+                    existing = cursor.fetchone()
+                    if existing:
+                        cursor.execute(
+                            """UPDATE backup_schedule_asset_link
+                               SET asset_pnum = %s, linked_at = NOW()
+                               WHERE schedule_id = %s""",
+                            (m['asset_pnum'], m['schedule_id'])
+                        )
+                        updated += 1
+                    else:
+                        cursor.execute(
+                            """INSERT INTO backup_schedule_asset_link (schedule_id, asset_pnum)
+                               VALUES (%s, %s)""",
+                            (m['schedule_id'], m['asset_pnum'])
+                        )
+                        mapped += 1
+            connection.commit()
+        finally:
+            connection.close()
+
+        return jsonify({
+            'success': True,
+            'message': f'자동 맵핑 완료: 신규 {mapped}건, 갱신 {updated}건',
+            'mapped': mapped,
+            'updated': updated,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @backup_bp.route('/api/schedule-by-policy')
 def api_schedule_by_policy():
     """Policy와 Schedule로 스케줄 조회"""
@@ -855,7 +1477,8 @@ def api_schedule_by_policy():
 
                 # 관련 백업 이력 조회
                 history_sql = """
-                SELECT * FROM backup_history 
+                SELECT bh.*, COALESCE(bh.code_status, bh.job_status) AS status_code
+                FROM backup_history bh
                 WHERE policy_name = %s AND schedule_name = %s
                 ORDER BY job_start_time DESC 
                 LIMIT 100
@@ -882,8 +1505,8 @@ def api_schedule_by_policy():
                         item['job_start_time'] = item['job_start_time'].strftime('%Y-%m-%d %H:%M:%S')
                     if item['job_end_time']:
                         item['job_end_time'] = item['job_end_time'].strftime('%Y-%m-%d %H:%M:%S')
-                    item['status_display'] = get_status_display(item['job_status'])
-                    item['status_class'] = get_status_class(item['job_status'])
+                    item['status_display'] = get_status_display(item['status_code'])
+                    item['status_class'] = get_status_class(item['status_code'])
                 return jsonify({
                     'schedule': schedule,
                     'history': history,
@@ -997,7 +1620,8 @@ def api_schedule_detail(schedule_id):
             with connection.cursor() as cursor:
                 # 관련 백업 이력 조회
                 history_sql = """
-                SELECT * FROM backup_history 
+                SELECT bh.*, COALESCE(bh.code_status, bh.job_status) AS status_code
+                FROM backup_history bh
                 WHERE policy_name = %s AND schedule_name = %s
                 ORDER BY job_start_time DESC 
                 LIMIT 100
@@ -1025,8 +1649,8 @@ def api_schedule_detail(schedule_id):
                         item['job_start_time'] = item['job_start_time'].strftime('%Y-%m-%d %H:%M:%S')
                     if item['job_end_time']:
                         item['job_end_time'] = item['job_end_time'].strftime('%Y-%m-%d %H:%M:%S')
-                    item['status_display'] = get_status_display(item['job_status'])
-                    item['status_class'] = get_status_class(item['job_status'])
+                    item['status_display'] = get_status_display(item['status_code'])
+                    item['status_class'] = get_status_class(item['status_code'])
 
                 return jsonify({
                     'schedule': schedule,
@@ -1557,7 +2181,7 @@ def api_bulk_delete_schedule():
 
 @backup_bp.route('/upload/backup-history', methods=['POST'])
 def upload_backup_history():
-    """백업 이력 Excel 업로드"""
+    """백업 이력 업로드 (CSV/Excel)"""
     try:
         if 'file' not in request.files:
             return jsonify({'error': '파일이 선택되지 않았습니다.'}), 400
@@ -1566,74 +2190,43 @@ def upload_backup_history():
         if file.filename == '':
             return jsonify({'error': '파일이 선택되지 않았습니다.'}), 400
 
-        if not file.filename.lower().endswith(('.xlsx', '.xls')):
-            return jsonify({'error': 'Excel 파일만 업로드 가능합니다.'}), 400
+        lower_name = file.filename.lower()
+        if not lower_name.endswith(('.xlsx', '.xls', '.csv')):
+            return jsonify({'error': 'CSV 또는 Excel 파일만 업로드 가능합니다.'}), 400
 
-        # Excel 파일 읽기
-        df = pd.read_excel(file, header=4)
+        if lower_name.endswith('.csv'):
+            df = pd.read_csv(file, encoding='utf-8-sig')
+            df = _normalize_columns(df)
+        else:
+            # 헤더 행 자동 탐색: 0(기본), 3(설명 3행 포함 템플릿) 순으로 시도
+            df = None
+            for header_row in [0, 3, 4]:
+                file.stream.seek(0)
+                try:
+                    candidate = pd.read_excel(file, header=header_row)
+                except Exception:
+                    continue
+                candidate = _normalize_columns(candidate)
+                is_new = all(c in candidate.columns for c in REQUIRED_NEW_COLUMNS)
+                is_legacy = all(c in candidate.columns for c in REQUIRED_LEGACY_COLUMNS)
+                if is_new or is_legacy:
+                    df = candidate
+                    break
+            if df is None:
+                file.stream.seek(0)
+                df = pd.read_excel(file, header=0)
 
-        # 필수 컬럼 확인
-        required_columns = ['시작시간', '종료시간', '정책명', '스케줄명', '상태', '용량(GB)', 'Type']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            return jsonify({'error': f'필수 컬럼이 누락되었습니다: {", ".join(missing_columns)}'}), 400
+        result = import_backup_history_dataframe(df, source_file=file.filename)
+        if result.get('error'):
+            return jsonify({'error': result['error']}), 400
 
-        # 데이터 처리 및 저장
-        connection = get_db_connection()
-        success_count = 0
-        error_count = 0
-
-        try:
-            with connection.cursor() as cursor:
-                for index, row in df.iterrows():
-                    try:
-                        # 상태 코드 변환 (int)
-                        status_code = int(row['상태']) if pd.notna(row['상태']) else 0
-
-                        # 용량 처리
-                        data_size_gb = float(row['용량(GB)']) if pd.notna(row['용량(GB)']) else 0
-
-                        # 중복제거률 처리 (없으면 0%)
-                        deduplication_rate = float(row['중복제거률(%)']) if pd.notna(row.get('중복제거률(%)', 0)) else 0
-
-                        # 실용량 계산: 용량 * (100 - 중복제거률) / 100
-                        actual_size_gb = data_size_gb * (100 - deduplication_rate) / 100
-
-                        # Type 처리
-                        backup_type = row['Type'] if pd.notna(row['Type']) else 'Backup'
-
-                        sql = """
-                        INSERT INTO backup_history (
-                            job_start_time, job_end_time, policy_name, schedule_name,
-                            job_status, backup_type, data_size_gb, deduplication_rate, actual_size_gb
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """
-
-                        cursor.execute(sql, (
-                            pd.to_datetime(row['시작시간']) if pd.notna(row['시작시간']) else None,
-                            pd.to_datetime(row['종료시간']) if pd.notna(row['종료시간']) else None,
-                            row['정책명'] if pd.notna(row['정책명']) else None,
-                            row['스케줄명'] if pd.notna(row['스케줄명']) else None,
-                            status_code,
-                            backup_type,
-                            data_size_gb,
-                            deduplication_rate,
-                            actual_size_gb
-                        ))
-                        success_count += 1
-                    except Exception as e:
-                        error_count += 1
-                        print(f"Row {index + 1} error: {str(e)}")
-                        continue
-
-                connection.commit()
-
-                return jsonify({
-                    'success': True,
-                    'message': f'업로드 완료: 성공 {success_count}건, 실패 {error_count}건'
-                })
-        finally:
-            connection.close()
+        response = {
+            'success': True,
+            'message': f"업로드 완료: 신규 {result['inserted']}건, 갱신 {result['updated']}건, 실패 {result['failed']}건"
+        }
+        if result.get('row_errors'):
+            response['row_errors'] = result['row_errors']
+        return jsonify(response)
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1794,14 +2387,23 @@ def download_backup_history_template():
     """백업 이력 템플릿 다운로드"""
     try:
         template_data = {
-            '시작시간': ['2024-01-01 02:00'],
-            '종료시간': ['2024-01-01 02:15'],
-            '정책명': ['AML_ARCH'],
-            '스케줄명': ['AML_ARCH_D'],
-            '상태': [0],
-            '용량(GB)': [1500.5],
-            'Type': ['Backup'],
-            '중복제거률(%)': [65.5]
+            'Client Name': ['host01'],
+            'Job Duration': ['00:15:30'],
+            'Job File Count': [120],
+            'Job Primary ID': ['123456789'],
+            'Schedule/Level Type': ['Full'],
+            'Master Server': ['master01'],
+            'Media Server': ['media01'],
+            'Policy Name': ['AML_ARCH'],
+            'Job Type': ['Backup'],
+            'Schedule Name': ['AML_ARCH_D'],
+            'Protected Data Size(GB)': [1500.5],
+            'Job Start Time': ['2026-04-10 02:00:00'],
+            'Job End Time': ['2026-04-10 02:15:30'],
+            'Post Deduplication Size(GB)': [510.2],
+            'Total Optimization % (Accelerator + Deduplication)': [66.0],
+            'Job Status': ['Done'],
+            'Code Status': [0]
         }
 
         df = pd.DataFrame(template_data)
@@ -1813,9 +2415,9 @@ def download_backup_history_template():
             # 시트에 설명 추가
             worksheet = writer.sheets['백업이력템플릿']
             worksheet.insert_rows(0, 3)
-            worksheet['A1'] = '상태 코드: 0, 112 = 성공, 1 = 부분성공, 그 외 = 실패'
-            worksheet['A2'] = 'Type: Backup, Archive, Replication'
-            worksheet['A3'] = '중복제거률(%): 입력 없으면 0% (용량 = 실용량)'
+            worksheet['A1'] = 'CSV 수집 양식과 동일합니다. 컬럼명은 변경하지 마세요.'
+            worksheet['A2'] = '비교 기준: Policy Name + Schedule Name, 실패 기준: Code Status != 0'
+            worksheet['A3'] = 'Post Deduplication Size(GB)가 비어있으면 Protected Data Size와 Optimization으로 계산됩니다.'
 
         output.seek(0)
 

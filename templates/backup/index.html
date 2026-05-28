@@ -28,7 +28,7 @@
                                         </div>
                                         <div class="text-right">
                                             <small class="text-muted">사용률</small>
-                                            <h6 class="text-{% if storage.usage_percentage > 80 %}danger{% elif storage.usage_percentage > 60 %}warning{% else %}success{% endif %}">
+                                            <h6 class="text-{% if storage.usage_percentage >= 90 %}danger{% elif storage.usage_percentage >= 85 %}warning{% else %}success{% endif %}">
                                                 {{ "%.1f"|format(storage.usage_percentage) }}%
                                             </h6>
                                             <button class="btn btn-sm btn-outline-danger" onclick="deleteStorage({{ storage.id }})" title="삭제">
@@ -37,7 +37,7 @@
                                         </div>
                                     </div>
                                     <div class="progress mb-2" style="height: 10px;">
-                                        <div class="progress-bar bg-{% if storage.usage_percentage > 80 %}danger{% elif storage.usage_percentage > 60 %}warning{% else %}success{% endif %}"
+                                        <div class="progress-bar bg-{% if storage.usage_percentage >= 90 %}danger{% elif storage.usage_percentage >= 85 %}warning{% else %}success{% endif %}"
                                              style="width: {{ storage.usage_percentage }}%"></div>
                                     </div>
                                     <div class="row text-center">
@@ -115,7 +115,7 @@
         <div class="col-md-6">
             <div class="card">
                 <div class="card-header">
-                    <h5><i class="fas fa-history"></i> 지난 백업 (24시간)</h5>
+                    <h5><i class="fas fa-history"></i> 실패 백업 (24시간)</h5>
                 </div>
                 <div class="card-body" style="max-height: 400px; overflow-y: auto;">
                     <div class="table-responsive">
@@ -152,7 +152,7 @@
         <div class="col-md-6">
             <div class="card">
                 <div class="card-header">
-                    <h5><i class="fas fa-clock"></i> 실행될 백업 (24시간)</h5>
+                    <h5><i class="fas fa-exclamation-triangle"></i> 미실행 스케줄 (24시간)</h5>
                 </div>
                 <div class="card-body" style="max-height: 400px; overflow-y: auto;">
                     <div class="table-responsive">
@@ -174,7 +174,7 @@
                                     <td>{{ backup.policy_name }}</td>
                                     <td>{{ backup.schedule_name }}</td>
                                     <td>
-                                        <span class="badge badge-info">Scheduled</span>
+                                        <span class="badge badge-danger">Missed</span>
                                     </td>
                                 </tr>
                                 {% endfor %}
@@ -197,6 +197,9 @@
                         <input type="date" id="historyEndDate" class="form-control form-control-sm mr-2"
                                value="{{ end_date }}">
                         <button class="btn btn-primary btn-sm mr-2" onclick="updateHistory()">조회</button>
+                        <button class="btn btn-outline-primary btn-sm mr-2" onclick="collectHistoryNow()">
+                            <i class="fas fa-sync"></i> 폴더 수집
+                        </button>
                         <button class="btn btn-success btn-sm" onclick="openHistoryUploadModal()">
                             <i class="fas fa-upload"></i> 수동 등록
                         </button>
@@ -384,10 +387,9 @@
             <div class="modal-body">
                 <div class="alert alert-info">
                     <strong>입력 형식:</strong><br>
-                    • 시작시간/종료시간: YYYY-MM-DD HH:MM<br>
-                    • 상태: 0, 112 = 성공 | 1 = 부분성공 | 그 외 = 실패<br>
-                    • Type: Backup, Archive, Replication<br>
-                    • 중복제거률(%): 입력 없으면 0% (용량 = 실용량)
+                    • 권장: CSV 원본 양식(Client Name, Job Primary ID, Policy Name ...)<br>
+                    • 비교 기준: Policy Name + Schedule Name<br>
+                    • 실패 기준: Code Status != 0
                 </div>
                 <div class="mb-3">
                     <a href="{{ url_for('backup.download_backup_history_template') }}" class="btn btn-info">
@@ -396,8 +398,8 @@
                 </div>
                 <form id="historyUploadForm" enctype="multipart/form-data">
                     <div class="form-group">
-                        <label>Excel 파일 업로드</label>
-                        <input type="file" class="form-control-file" name="file" accept=".xlsx,.xls" required>
+                        <label>CSV/Excel 파일 업로드</label>
+                        <input type="file" class="form-control-file" name="file" accept=".csv,.xlsx,.xls" required>
                     </div>
                     <button type="submit" class="btn btn-primary">업로드</button>
                 </form>
@@ -684,6 +686,21 @@ function updateHistory() {
     });
 }
 
+function collectHistoryNow() {
+    $.ajax({
+        url: '/backup/api/backup-history/collect',
+        method: 'POST',
+        success: function(response) {
+            alert(response.message);
+            location.reload();
+        },
+        error: function(xhr) {
+            const error = xhr.responseJSON ? xhr.responseJSON.error : '오류가 발생했습니다.';
+            alert('오류: ' + error);
+        }
+    });
+}
+
 function drawStorageChart(data) {
     // 스토리지별로 데이터 그룹화
     const storageGroupsUsage = {};
@@ -791,7 +808,7 @@ function showBackupDetailByPolicy(policyName, scheduleName) {
         data: { policy_name: policyName, schedule_name: scheduleName },
         success: function(response) {
             if (response.schedule) {
-                loadLinkedAsset(response.schedule, response.history, response.expected_capacity);
+                showScheduleDetail(response.schedule, response.history, response.expected_capacity);
             } else {
                 alert('해당 스케줄을 찾을 수 없습니다.');
             }
@@ -816,7 +833,7 @@ function loadLinkedAsset(schedule, history, expectedCapacity) {
         }
     });
 }
-function showScheduleDetail(schedule, history, expectedCapacity, pnum) {
+function showScheduleDetail(schedule, history, expectedCapacity) {
     let detailHtml = `
         <div class="row">
             <div class="col-md-6">
@@ -824,7 +841,7 @@ function showScheduleDetail(schedule, history, expectedCapacity, pnum) {
                 <table class="table table-sm">
                     <tr><th>고유번호</th><td>${schedule.unique_id || '-'}</td></tr>
                     <tr><th>구분</th><td>${schedule.category || '-'}</td></tr>
-                    <tr><th>업무명</th><td><a href=/edit/${pnum}>${schedule.business_name || '-'}</a></td></tr>
+                    <tr><th>업무명</th><td>${schedule.business_name || '-'}</td></tr>
                     <tr><th>호스트명</th><td>${schedule.hostname || '-'}</td></tr>
                     <tr><th>IP주소</th><td>${schedule.ip_address || '-'}</td></tr>
                     <tr><th>도입년도</th><td>${schedule.introduction_year || '-'}</td></tr>

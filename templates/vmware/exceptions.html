@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>VMware 변경 이력 예외 관리</h2>
+<hr width="100%" class="divider"/>
+
+<!-- 뒤로 가기 -->
+<div class="mb-3">
+    <a href="{{ url_for('vmware.changes') }}" class="btn btn-secondary">← 변경 이력으로</a>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">예외 처리된 VM 목록</h5>
+        <p class="card-text">
+            아래 호스트명과 IP를 가진 VM의 변경 이력은 자동으로 숨겨집니다.
+        </p>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-striped table-hover">
+        <thead>
+            <tr>
+                <th>호스트명</th>
+                <th>IP</th>
+                <th>예외 등록일</th>
+                <th>차단된 변경 건수</th>
+                <th>작업</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if exceptions %}
+                {% for exception in exceptions %}
+                <tr>
+                    <td>{{ exception.hostname }}</td>
+                    <td>{{ exception.ip }}</td>
+                    <td>{{ exception.created_at.strftime('%Y-%m-%d %H:%M') if exception.created_at else '' }}</td>
+                    <td>
+                        {% if exception.blocked_changes > 0 %}
+                            <span class="badge badge-warning">{{ exception.blocked_changes }}건</span>
+                        {% else %}
+                            <span class="badge badge-secondary">0건</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form action="{{ url_for('vmware.remove_exception', exception_id=exception.exception_id) }}" method="POST" style="display: inline;">
+                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('예외를 해제하시겠습니까? 관련 변경 이력이 다시 표시됩니다.');">
+                                예외 풀기
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="5" class="text-center">예외 처리된 항목이 없습니다.</td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

@@ -396,8 +396,8 @@ def software_index():
         # 소프트웨어 목록 조회
         cursor.execute("""
             SELECT s.sw_idx, s.sw_name, s.sw_version, s.sw_eos, s.sw_eosl, 
-                   s.sw_memo, s.sw_status, st.type_name,
-                   CASE s.sw_status 
+                   s.sw_memo, s.sw_isoper, st.type_name,
+                   CASE s.sw_isoper 
                        WHEN 1 THEN '사용' 
                        ELSE '미사용' 
                    END as isoper_state
@@ -419,7 +419,7 @@ def software_index():
         cursor.close()
         conn.close()
 
-    return render_template('service/index.html',
+    return render_template('service/software.html',
                            software_list=software_list,
                            software_types=software_types)
 
@@ -535,15 +535,18 @@ def upload_software():
 
     # 임시 파일로 저장
     filename = secure_filename(file.filename)
-    temp_path = os.path.join('/tmp', filename)
+    temp_path = os.path.join('exports', filename)
     file.save(temp_path)
 
     try:
         # 엑셀 파일 로드
         df = pd.read_excel(temp_path)
-
+        # NaN 값 처리
+        for col in ["버전", "EOS", "EOSL", "사용여부", "메모"]:
+            if col in df.columns:
+                df[col] = df[col].fillna("")
         # 필수 컬럼 확인
-        required_columns = ["종류", "소프트웨어명"]
+        required_columns = ["종류*", "소프트웨어명*"]
         for column in required_columns:
             if column not in df.columns:
                 return jsonify({'success': False, 'message': f'필수 컬럼 "{column}"이 없습니다.'})
@@ -556,7 +559,7 @@ def upload_software():
         try:
             for _, row in df.iterrows():
                 # 소프트웨어 종류 코드 조회
-                cursor.execute("SELECT type_idx FROM info_software_type WHERE type_name = %s", (row['종류'],))
+                cursor.execute("SELECT type_idx FROM info_software_type WHERE type_name = %s", (row['종류*'],))
                 type_result = cursor.fetchone()
 
                 if not type_result:
@@ -583,7 +586,7 @@ def upload_software():
                 cursor.execute("""
                     INSERT INTO info_software (sw_type, sw_name, sw_version, sw_eos, sw_eosl, sw_status, sw_memo)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (type_result['type_idx'], row['소프트웨어명'], row.get('버전', ''),
+                """, (type_result['type_idx'], row['소프트웨어명*'], row.get('버전', ''),
                       eos_date, eosl_date, sw_status, row.get('메모', '')))
 
                 inserted_count += 1
@@ -647,15 +650,12 @@ def edit_software(sw_idx):
         sw_memo = request.form.get('sw_memo', '')
 
         try:
+            cursor.execute("SELECT type_idx FROM info_software_type WHERE type_name = %s", (sw_type,))
+            type_result = cursor.fetchone()
+
             # 날짜 형식 변환
             eos_date = datetime.strptime(sw_eos, '%Y-%m-%d').date() if sw_eos else None
             eosl_date = datetime.strptime(sw_eosl, '%Y-%m-%d').date() if sw_eosl else None
-
-            cursor.execute("SELECT type_idx FROM info_software_type WHERE type_name = %s", (sw_type,))
-            type_result = cursor.fetchone()
-            print(type_result)
-            if not type_result:
-                return jsonify({'success': False, 'message': '유효하지 않은 소프트웨어 종류입니다.'})
 
             cursor.execute("""
                 UPDATE info_software 
@@ -706,7 +706,7 @@ def edit_software(sw_idx):
 
     except Exception as e:
         flash(f'소프트웨어 정보를 가져오는 중 오류가 발생했습니다: {e}', 'danger')
-        return redirect(url_for('service.index'))
+        return redirect(url_for('service.software_index'))
     finally:
         cursor.close()
         conn.close()
@@ -878,7 +878,7 @@ def get_linked_software(pnum):
 
     try:
         cursor.execute("""
-            SELECT s.sw_idx, s.sw_name, s.sw_version, st.type_name,
+            SELECT s.sw_idx, s.sw_name, s.sw_version, st.type_name, s.sw_eos, s.sw_eosl,
                    CASE s.sw_status 
                        WHEN 1 THEN '사용' 
                        ELSE '미사용' 
@@ -889,6 +889,10 @@ def get_linked_software(pnum):
             WHERE ts.software_pnum = %s
         """, (pnum,))
         software_list = cursor.fetchall()
+        # print(software_list)
+        # 날짜 형식 변환
+        # software_list['sw_eos'] = datetime.strptime(software_list['sw_eos'], '%Y-%m-%d').date() if software_list['sw_eos'] else "미정"
+        # software_list['sw_eosl'] = datetime.strptime(software_list['sw_eosl'], '%Y-%m-%d').date() if software_list['sw_eosl'] else "미정"
         return jsonify(software_list)
     except Exception as e:
         print(f"Error fetching linked software: {e}")
@@ -913,8 +917,7 @@ def bulk_upload_software():
 
     # 임시 파일로 저장
     filename = secure_filename(file.filename)
-    temp_path = os.path.join(os.getcwd(), 'uploads', filename)
-    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+    temp_path = os.path.join('exports', filename)
     file.save(temp_path)
 
     try:
@@ -942,7 +945,7 @@ def bulk_upload_software():
                 'sw_version': row[2],
                 'sw_eos': row[3],
                 'sw_eosl': row[4],
-                'sw_isoper': 1 if row[5] == '사용' else 0,
+                'sw_status': 1 if row[5] == '사용' else 0,
                 'sw_memo': row[6] or ''
             })
 
@@ -953,7 +956,6 @@ def bulk_upload_software():
         conn = get_db_connection()
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         inserted_count = 0
-
         try:
             for item in data:
                 # 소프트웨어 종류 코드 조회
@@ -978,11 +980,13 @@ def bulk_upload_software():
                     elif isinstance(item['sw_eosl'], datetime):
                         eosl_date = item['sw_eosl'].date()
 
+                print(type_result['type_idx'], item['sw_name'], item['sw_version'],
+                      eos_date, eosl_date, item['sw_status'], item['sw_memo'])
                 cursor.execute("""
-                    INSERT INTO info_software (sw_type, sw_name, sw_version, sw_eos, sw_eosl, sw_isoper, sw_memo)
+                    INSERT INTO info_software (sw_type, sw_name, sw_version, sw_eos, sw_eosl, sw_status, sw_memo)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (type_result['type_idx'], item['sw_name'], item['sw_version'],
-                      eos_date, eosl_date, item['sw_isoper'], item['sw_memo']))
+                      eos_date, eosl_date, item['sw_status'], item['sw_memo']))
 
                 inserted_count += 1
 
@@ -1350,7 +1354,7 @@ def upload_services():
         try:
             # 기존 서비스 코드 가져오기
             cursor.execute("SELECT app_servicecode FROM info_service")
-            existing_codes = [row[0] for row in cursor.fetchall()]
+            existing_codes = [row['app_servicecode'] for row in cursor.fetchall()]
 
             for _, row in df.iterrows():
                 try:
@@ -1478,12 +1482,12 @@ def upload_links():
                         invalid_count += 1
                         continue
 
-                    app_idx = service_result[0]
+                    app_idx = service_result['app_idx']
                     pnum = int(row["pnum"])
 
                     # 자산 번호 유효성 확인
                     cursor.execute("SELECT COUNT(*) FROM total_asset WHERE pnum = %s", (pnum,))
-                    if cursor.fetchone()[0] == 0:
+                    if cursor.fetchone()['COUNT(*)'] == 0:
                         invalid_count += 1
                         continue
 
@@ -1493,7 +1497,7 @@ def upload_links():
                         WHERE service_appidx = %s AND service_pnum = %s
                     """, (app_idx, pnum))
 
-                    if cursor.fetchone()[0] > 0:
+                    if cursor.fetchone()['COUNT(*)'] > 0:
                         already_linked_count += 1
                         continue
 

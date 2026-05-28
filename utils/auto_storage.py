@@ -9,7 +9,7 @@ from utils.db import execute_query, get_db_connection
 
 # 자동 등록 설정
 AUTO_STORAGE_FOLDER = 'autodata/storage'
-CHECK_INTERVAL = 10  # 10분마다 확인
+CHECK_INTERVAL = 30  # 30분마다 확인
 
 
 def setup_auto_storage():

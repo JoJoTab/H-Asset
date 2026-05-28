@@ -1,4 +1,5 @@
 import cx_Oracle
+import pandas as pd
 from config import Config
 
 # 전역 DB 연결 객체
@@ -80,4 +81,22 @@ def execute_many(query, params_list):
             cursor.executemany(query, params_list)
             conn.commit()
     finally:
+        conn.close()
+
+
+def OrclSQLpy(query, params=None):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params or [])
+
+            row = cursor.fetchall()
+
+            column_name = cursor.description
+            columns = [i[0].lower() for i in column_name]
+
+            result = pd.DataFrame(row, columns=columns)
+            return result
+    finally:
+        conn.commit()
         conn.close()

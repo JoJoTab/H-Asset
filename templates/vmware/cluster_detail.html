@@ -1,0 +1,205 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>클러스터: {{ cluster_host }}</h2>
+<hr width="100%" class="divider"/>
+
+<!-- 뒤로 가기 -->
+<div class="mb-3">
+    <a href="{{ url_for('vmware.index') }}" class="btn btn-secondary">← 목록으로</a>
+</div>
+
+<!-- 클러스터 맵핑 정보 표시 -->
+{% if cluster_info %}
+<div class="alert alert-info mb-4">
+    <strong>클러스터 맵핑 정보:</strong>
+    {% if cluster_info.pnum %}
+        맵핑된 자산: <a href="{{ url_for('asset.edit_asset', pnum=cluster_info.pnum) }}">{{ cluster_info.cluster_servername }} ({{ cluster_info.cluster_ip }})</a>
+        {% if cluster_info.last_file_read %}
+            | 최근 업데이트: {{ cluster_info.last_file_read.strftime('%Y-%m-%d %H:%M') }}
+        {% endif %}
+    {% else %}
+        <span class="text-warning">클러스터가 자산에 맵핑되지 않았습니다.</span>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Add hosts section -->
+{% if hosts %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h4>클러스터 내 Host 목록</h4>
+    </div>
+    <div class="card-body">
+        <table class="table table-sm table-bordered">
+            <thead>
+                <tr>
+                    <th>Host 이름</th>
+                    <th>맵핑된 자산</th>
+                    <th>VM 개수</th>
+                    <th>최근 확인</th>
+                    <th>작업</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for host in hosts %}
+                <tr>
+                    <td>{{ host.host_name }}</td>
+                    <td>
+                        {% if host.pnum %}
+                            <a href="{{ url_for('asset.edit_asset', pnum=host.pnum) }}">{{ host.host_servername }}</a>
+                        {% else %}
+                            <span class="text-muted">미맵핑</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ host.vm_count }}</td>
+                    <td>
+                        {% if host.last_seen %}
+                            {{ host.last_seen.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('vmware.map_host', host_id=host.host_id) }}" class="btn btn-sm btn-outline-primary">
+                            {% if host.pnum %}맵핑 변경{% else %}맵핑하기{% endif %}
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- 클러스터 통계 -->
+<div class="row mb-4">
+    <div class="col-md-2">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title">전체 VM</h6>
+                <p class="h3">{{ stats.total_vms or 0 }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title">사용 중</h6>
+                <p class="h3 text-success">{{ stats.active_count or 0 }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title">폐기</h6>
+                <p class="h3 text-danger">{{ stats.inactive_count or 0 }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title">맵핑 완료</h6>
+                <p class="h3 text-primary">{{ stats.mapped_count or 0 }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title">총 CPU</h6>
+                <p class="h3">{{ stats.total_cpu or 0 }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center">
+            <div class="card-body">
+                <h6 class="card-title">총 메모리</h6>
+                <p class="h3">{{ stats.total_memory or 0 }} GB</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- VM 목록 -->
+<h3>VM 목록</h3>
+<div class="table-responsive">
+    <table id="vm_table" class="table table-striped table-hover">
+        <thead>
+            <tr>
+                <th>VM명</th>
+                <th>호스트명</th>
+                <th>IP</th>
+                <th>서버명</th>
+                <th>Host</th>
+                <th>CPU</th>
+                <th>메모리(GB)</th>
+                <th>OS</th>
+                <th>상태</th>
+                <th>맵핑 상태</th>
+                <th>작업</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for vm in vms %}
+            <tr>
+                <td>{{ vm.vm_name }}</td>
+                <td>
+                    <a href="{{ url_for('vmware.vm_detail', vm_id=vm.vm_id) }}">{{ vm.hostname }}</a>
+                </td>
+                <td>{{ vm.ip }}</td>
+                <td>{{ vm.servername }}</td>
+                <!-- Display parent_host with mapping info -->
+                <td>
+                    {{ vm.parent_host or '-' }}
+                    {% if vm.host_pnum %}
+                        <br><small class="text-muted">({{ vm.host_servername }})</small>
+                    {% endif %}
+                </td>
+                <td>{{ vm.cpu_cores }}</td>
+                <td>{{ vm.memory_gb }}</td>
+                <td>{{ vm.os_version }}</td>
+                <td>
+                    {% if vm.status == '사용' %}
+                        <span class="badge badge-success">사용</span>
+                    {% else %}
+                        <span class="badge badge-danger">폐기</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if vm.pnum %}
+                        <a href="{{ url_for('asset.edit_asset', pnum=vm.pnum) }}" class="badge badge-primary">
+                            맵핑됨 ({{ vm.mapped_servername }})
+                        </a>
+                    {% else %}
+                        <span class="badge badge-warning">미맵핑</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{{ url_for('vmware.vm_detail', vm_id=vm.vm_id) }}" class="btn btn-sm btn-outline-info">상세</a>
+                    {% if not vm.pnum %}
+                        <a href="{{ url_for('vmware.map_asset', vm_id=vm.vm_id) }}" class="btn btn-sm btn-outline-primary">맵핑</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+$(document).ready(function() {
+    $('#vm_table').DataTable({
+        pageLength: 25,
+        language: {
+            url: "{{ url_for('static', filename='js/korean.json') }}"
+        }
+    });
+});
+</script>
+
+{% endblock %}
